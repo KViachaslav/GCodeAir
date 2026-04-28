@@ -1,0 +1,964 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>G-code Sender + Motion Preview</title>
+  <style>
+    :root{
+      --bg:#0b1220;
+      --panel:#121b2f;
+      --text:#e9eefc;
+      --muted:#a9b4d0;
+      --accent:#6ea8fe;
+      --danger:#ff5c7a;
+      --ok:#2dd4bf;
+      --border:rgba(255,255,255,.12);
+      --shadow: 0 10px 30px rgba(0,0,0,.35);
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      --sans: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Noto Sans", "Liberation Sans", sans-serif;
+    }
+
+    *{ box-sizing:border-box; }
+    body{
+      margin:0;
+      font-family:var(--sans);
+      background: radial-gradient(1200px 600px at 15% 10%, rgba(110,168,254,.18), transparent 55%),
+                  radial-gradient(900px 450px at 80% 20%, rgba(45,212,191,.12), transparent 55%),
+                  var(--bg);
+      color:var(--text);
+      padding: 18px;
+    }
+
+    .wrap{
+      max-width: 1100px;
+      margin: 0 auto;
+      display: grid;
+      gap: 14px;
+    }
+
+    header{
+      display:flex;
+      gap:12px;
+      align-items:flex-start;
+      justify-content:space-between;
+      flex-wrap:wrap;
+    }
+
+    .title h1{
+      margin:0;
+      font-size: 20px;
+      letter-spacing:.2px;
+    }
+    .title p{
+      margin:6px 0 0 0;
+      color:var(--muted);
+      font-size: 13px;
+      max-width: 62ch;
+      line-height: 1.35;
+    }
+
+    .card{
+      background: linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.02));
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      box-shadow: var(--shadow);
+      overflow:hidden;
+    }
+
+    /* 3 колонки на больших экранах: G-code | Controls/Log | Preview */
+    .grid{
+      display:grid;
+      grid-template-columns: 1.05fr .8fr 1fr;
+      gap: 14px;
+    }
+
+    @media (max-width: 1050px){
+      .grid{ grid-template-columns: 1fr; }
+    }
+
+    .section{
+      padding: 14px;
+    }
+
+    label{
+      color:var(--muted);
+      font-size: 12px;
+      display:block;
+      margin-bottom:6px;
+    }
+
+    input[type="text"], select, input[type="number"], textarea{
+      width:100%;
+      border:1px solid var(--border);
+      background: rgba(0,0,0,.15);
+      color:var(--text);
+      border-radius: 10px;
+      padding: 10px 12px;
+      outline:none;
+      font-size: 14px;
+    }
+
+    textarea{
+      min-height: 320px;
+      font-family: var(--mono);
+      white-space: pre;
+      resize: vertical;
+    }
+
+    .controls{
+      display:grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+    @media (max-width: 520px){
+      .controls{ grid-template-columns: 1fr; }
+    }
+
+    button{
+      border:0;
+      border-radius: 12px;
+      padding: 11px 12px;
+      font-weight: 650;
+      letter-spacing:.2px;
+      cursor:pointer;
+      transition: transform .04s ease, filter .15s ease, background .15s ease;
+      background: rgba(110,168,254,.18);
+      color: var(--text);
+      border: 1px solid rgba(110,168,254,.35);
+      width: 100%;
+    }
+    button:hover{ filter: brightness(1.05); }
+    button:active{ transform: translateY(1px); }
+
+    .btn-primary{
+      background: linear-gradient(180deg, rgba(110,168,254,.35), rgba(110,168,254,.18));
+      border-color: rgba(110,168,254,.55);
+    }
+    .btn-danger{
+      background: linear-gradient(180deg, rgba(255,92,122,.28), rgba(255,92,122,.14));
+      border-color: rgba(255,92,122,.55);
+    }
+    .btn-ok{
+      background: linear-gradient(180deg, rgba(45,212,191,.28), rgba(45,212,191,.14));
+      border-color: rgba(45,212,191,.55);
+    }
+
+    .row{
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+      align-items:center;
+    }
+
+    .status{
+      display:flex;
+      flex-direction:column;
+      gap:10px;
+    }
+
+    .pill{
+      display:flex;
+      gap:10px;
+      align-items:center;
+      padding:10px 12px;
+      border-radius: 12px;
+      border:1px solid var(--border);
+      background: rgba(0,0,0,.12);
+    }
+
+    .dot{
+      width:10px;
+      height:10px;
+      border-radius:999px;
+      background: var(--muted);
+      box-shadow: 0 0 0 3px rgba(255,255,255,.04);
+      flex: 0 0 auto;
+    }
+    .dot.ok{ background: var(--ok); }
+    .dot.bad{ background: var(--danger); }
+
+    .pill .meta{
+      display:flex;
+      flex-direction:column;
+      gap:2px;
+      min-width: 200px;
+    }
+    .pill .meta b{ font-size: 13px; }
+    .pill .meta span{ font-size: 12px; color: var(--muted); }
+
+    .log{
+      border: 1px solid var(--border);
+      background: rgba(0,0,0,.18);
+      border-radius: 12px;
+      padding: 10px;
+      font-family: var(--mono);
+      font-size: 12px;
+      max-height: 280px;
+      overflow:auto;
+      white-space: pre-wrap;
+    }
+
+    .small{
+      font-size: 12px;
+      color: var(--muted);
+      line-height: 1.4;
+      margin-top: 10px;
+    }
+
+    .kbd{
+      font-family: var(--mono);
+      font-size: 12px;
+      border:1px solid var(--border);
+      padding:2px 6px;
+      border-radius: 8px;
+      background: rgba(255,255,255,.03);
+      color: var(--text);
+    }
+
+    /* Preview */
+    .previewHeader{
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:10px;
+      margin-bottom: 10px;
+    }
+
+    .segControls{
+      display:grid;
+      grid-template-columns: 1fr;
+      gap:8px;
+      width: 100%;
+    }
+
+    .segControls .tog{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      padding: 10px 12px;
+      border-radius: 12px;
+      border:1px solid var(--border);
+      background: rgba(0,0,0,.12);
+    }
+
+    .segControls input[type="checkbox"]{
+      width: 18px; height: 18px;
+      accent-color: var(--accent);
+    }
+
+    canvas{
+      width: 100%;
+      height: 360px;
+      display:block;
+      border-radius: 12px;
+      background: rgba(0,0,0,.20);
+      border: 1px solid var(--border);
+    }
+
+    .previewFooter{
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .mono{ font-family: var(--mono); }
+
+    .btn2{
+      display:grid;
+      grid-template-columns: 1fr 1fr;
+      gap:10px;
+      width: 100%;
+    }
+    @media (max-width: 520px){
+      .btn2{ grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="title">
+      <h1>Отправка G-code на станок + Просмотр движения</h1>
+      <p>
+        Вставьте G-code → подключите Serial → нажмите <b>Подключить</b> и <b>Отправить</b>.
+        Справа будет 2D-превью траектории по <span class="kbd">G0/G1</span> в плоскости <span class="kbd">X/Y</span>.
+      </p>
+    </div>
+    <div class="row">
+      <span class="kbd">Chrome/Edge</span>
+      <span class="kbd">Serial API</span>
+      <span class="kbd">2D Preview</span>
+    </div>
+  </header>
+
+  <div class="grid">
+    <!-- LEFT: GCODE -->
+    <section class="card">
+      <div class="section">
+        <label for="gcode">G-code</label>
+        <textarea id="gcode" spellcheck="false" placeholder="Вставьте сюда ваш G-code..."></textarea>
+
+        <div class="small">
+          Превью строится по строкам с <span class="kbd">X</span>/<span class="kbd">Y</span> и командами <span class="kbd">G0</span>, <span class="kbd">G1</span>.
+          Комментарии <span class="kbd">;</span> и <span class="kbd">( ... )</span> пропускаются.
+        </div>
+
+        <div class="btn2" style="margin-top: 12px;">
+          <button class="btn-ok" id="btnPreview">Обновить превью</button>
+          <button class="btn-primary" id="btnUseDemo">Загрузить демо</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- MIDDLE: CONTROLS + STATUS -->
+    <aside class="card">
+      <div class="section status">
+        <div class="pill">
+          <div id="dotConn" class="dot"></div>
+          <div class="meta">
+            <b id="connTitle">Не подключено</b>
+            <span id="connSub">Ожидание устройства...</span>
+          </div>
+        </div>
+
+        <div class="controls">
+          <div>
+            <label for="IP">Ip</label>
+            <input id="IP" type="text" value="192.168.1.58" />
+          </div>
+          <div>
+            <label for="Port">Port</label>
+            <input id="Port" type="number" value="8888" min="0" step="1" />
+          </div>
+        </div>
+
+        <div class="controls">
+          <button class="btn-primary" id="btnConnect">Подключить</button>
+          <button class="btn-danger" id="btnDisconnect" disabled>Отключить</button>
+        </div>
+
+        <div class="controls">
+          <button class="btn-ok" id="btnSend" disabled>Отправить</button>
+          <button class="btn-danger" id="btnStop" disabled>Стоп</button>
+        </div>
+
+        <label for="log">Лог</label>
+        <div class="log" id="log"></div>
+
+        <div class="small" id="note">
+          Превью — это симуляция. Чтобы видеть реальное движение, нужна интеграция ответов контроллера (handshake/telemetry),
+          это можно добавить позже.
+        </div>
+      </div>
+    </aside>
+
+    <!-- RIGHT: PREVIEW WINDOW -->
+    <section class="card">
+      <div class="section">
+        <div class="previewHeader">
+          <div>
+            <div style="font-weight:800; letter-spacing:.2px; margin-bottom:6px;">Просмотр движения</div>
+            <div class="small" style="margin-top:0;">
+              2D (X/Y). Непрерывная линия = <span class="kbd">G1</span>, пунктир = <span class="kbd">G0</span>.
+            </div>
+          </div>
+        </div>
+
+        <div class="segControls">
+          <div class="tog">
+            <span>Показывать оси и сетку</span>
+            <label style="margin:0;">
+              <input id="chkGrid" type="checkbox" checked />
+            </label>
+          </div>
+          <div class="tog">
+            <span>Показывать “текущую позицию”</span>
+            <label style="margin:0;">
+              <input id="chkHead" type="checkbox" checked />
+            </label>
+          </div>
+        </div>
+
+        <div style="height:10px"></div>
+
+        <canvas id="previewCanvas" width="900" height="600"></canvas>
+
+        <div class="previewFooter">
+          <div><span class="mono">X/Y</span>: <span id="bbInfo">—</span></div>
+          <div><span class="mono">Сегментов</span>: <span id="segInfo">0</span></div>
+          <div><span class="mono">Готово</span>: <span id="drawInfo">—</span></div>
+        </div>
+      </div>
+    </section>
+  </div>
+</div>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+
+  const dotConn = $("dotConn");
+  const connTitle = $("connTitle");
+  const connSub = $("connSub");
+  const logEl = $("log");
+
+  const gcodeEl = $("gcode");
+  const IPEl = $("IP");
+  const PortEl = $("Port");
+
+  const btnConnect = $("btnConnect");
+  const btnDisconnect = $("btnDisconnect");
+  const btnSend = $("btnSend");
+  const btnStop = $("btnStop");
+
+  // Preview refs
+  const btnPreview = $("btnPreview");
+  const btnUseDemo = $("btnUseDemo");
+  const chkGrid = $("chkGrid");
+  const chkHead = $("chkHead");
+  const canvas = $("previewCanvas");
+  const ctx = canvas.getContext("2d");
+  const bbInfo = $("bbInfo");
+  const segInfo = $("segInfo");
+  const drawInfo = $("drawInfo");
+
+  let port = null;
+  let writer = null;
+  let sending = false;
+  let stopRequested = false;
+  let socket = null;
+
+
+
+  function log(msg){
+    const ts = new Date().toLocaleTimeString();
+    logEl.textContent += `[${ts}] ${msg}\n`;
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  function setConnected(connected, sub=""){
+    if (connected){
+      dotConn.classList.add("ok");
+      dotConn.classList.remove("bad");
+      connTitle.textContent = "Подключено";
+      connSub.textContent = sub || "Socket открыт";
+      btnDisconnect.disabled = false;
+      btnSend.disabled = false;
+    } else {
+      dotConn.classList.remove("ok");
+      dotConn.classList.remove("bad");
+      dotConn.classList.add("bad");
+      connTitle.textContent = "Не подключено";
+      connSub.textContent = sub || "Ожидание устройства...";
+      btnDisconnect.disabled = true;
+      btnSend.disabled = true;
+    }
+  }
+
+  function sleep(ms){
+    return new Promise(r => setTimeout(r, ms));
+  }
+
+  function normalizeGcode(text){
+    return text.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n");
+  }
+
+  function extractLines(gcodeText){
+    const lines = normalizeGcode(gcodeText).split("\n");
+    const cleaned = [];
+    for (let line of lines){
+      // remove inline comments after ';'
+      line = line.replace(/;.*$/g, "");
+      // remove bracket comments (simple)
+      line = line.replace(/\([^)]*\)/g, "");
+      const t = line.trim();
+      if (!t) continue;
+      cleaned.push(t);
+    }
+    return cleaned;
+  }
+
+  // async function writeLine(line){
+  //   const data = new TextEncoder().encode(line + "\n");
+  //   await writer.write(data);
+  // }
+  async function writeLine(line) {
+  if (!socket || socket.readyState !== WebSocket.OPEN) {
+    throw new Error("WebSocket is not connected (readyState != OPEN).");
+  }
+
+  
+  socket.send(line + "\n");
+  }
+
+  async function connect() {
+  setConnected(true,`${IPEl.value}:${PortEl.value}`);
+  if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
+    return socket;
+  }
+
+
+  socket = new WebSocket(`${IPEl.value}:${Port.value}`);
+  socket.binaryType = "arraybuffer";
+  
+  await new Promise((resolve, reject) => {
+    socket.addEventListener("open", resolve, { once: true });
+    socket.addEventListener("error", reject, { once: true });
+  });
+
+  return socket;
+  }
+  // async function connect(){
+  //   if (!("serial" in navigator)){
+  //     alert("Ваш браузер не поддерживает Web Serial API. Используйте Chrome/Edge.");
+  //     return;
+  //   }
+
+  //   try{
+  //     port = await navigator.serial.requestPort();
+  //     const baud = Number(baudEl.value || "115200");
+  //     if (!Number.isFinite(baud) || baud <= 0){
+  //       alert("Некорректный baud rate");
+  //       return;
+  //     }
+  //     await port.open({ baudRate: baud });
+  //     writer = port.writable.getWriter();
+
+  //     setConnected(true, `COM/USB: baud=${baud}`);
+  //     log("Порт открыт. Готов к отправке.");
+  //   } catch (e){
+  //     console.error(e);
+  //     setConnected(false, "Ошибка подключения");
+  //     log("Ошибка подключения: " + (e?.message || e));
+  //   }
+  // }
+
+  async function disconnect(){
+    stopRequested = true;
+    sending = false;
+
+    btnSend.disabled = true;
+    btnStop.disabled = true;
+
+
+    if (!socket) return;
+
+    // закрываем аккуратно
+    if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
+      socket.close(code, reason);
+    }
+
+  socket = null;
+  setConnected(false);
+    // try{
+    //   if (writer){
+    //     try { await writer.releaseLock(); } catch {}
+    //   }
+    //   if (port){
+    //     await port.close();
+    //   }
+    //   writer = null;
+    //   port = null;
+    //   log("Порт закрыт.");
+    // } catch (e){
+    //   console.error(e);
+    //   log("Ошибка отключения: " + (e?.message || e));
+    // } finally{
+    //   stopRequested = false;
+    //   sending = false;
+    //   btnStop.disabled = true;
+    //   btnSend.disabled = false; // можно снова отправлять после подключения, но мы отключили
+    //   setConnected(false);
+    // }
+  }
+
+  function parseWord(line, letter){
+    // пример: X12.34, Y-5, G1
+    const re = new RegExp(letter + "\\s*([-+]?\\d*\\.?\\d+)", "i");
+    const m = line.match(re);
+    return m ? Number(m[1]) : null;
+  }
+
+  function parseCommand(line){
+    // команда: G0/G1...
+    const m = line.match(/\bG\s*([0-9]+(?:\.[0-9]+)?)\b/i);
+    return m ? Number(m[1]) : null;
+  }
+
+  // Build preview segments for X/Y in mm/units (assumes G-code has consistent units).
+  function buildPreviewFromGcode(gcodeText){
+    const lines = extractLines(gcodeText);
+
+    let x = 0, y = 0;
+    let hasX = false, hasY = false;
+
+    // Some g-codes rely on modal motion; default assume G0 first.
+    let currentMotion = "G0";
+
+    const segs = [];
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+
+    for (const line of lines){
+      const cmd = parseCommand(line);
+      if (cmd === 0) currentMotion = "G0";
+      if (cmd === 1) currentMotion = "G1";
+
+      const nx = parseWord(line, "X");
+      const ny = parseWord(line, "Y");
+
+      // Update modal position even if no move command? we'll only create seg for moves.
+      const canMove = (currentMotion === "G0" || currentMotion === "G1");
+
+      if (nx !== null) { x = nx; hasX = true; }
+      if (ny !== null) { y = ny; hasY = true; }
+
+      // We draw only when we have at least one coordinate and current command is motion.
+      // (То есть создадим отрезок только если предыдущее положение известно.)
+      // Для простоты: если не знаем старт, сегмент не рисуем.
+      if (!hasX || !hasY) continue;
+
+      // Determine whether this line includes a movement in X/Y
+      // We'll treat it as a move from previous (prevX, prevY) to (x, y) if either X or Y present.
+      // To do that, we need prev positions:
+      // We'll reconstruct by keeping prev before parsing, so do it differently:
+    }
+
+    // Re-run with prev tracking correctly
+    x = 0; y = 0; hasX = false; hasY = false;
+    currentMotion = "G0";
+    for (const line of lines){
+      const cmd = parseCommand(line);
+      if (cmd === 0) currentMotion = "G0";
+      if (cmd === 1) currentMotion = "G1";
+
+      const nx = parseWord(line, "X");
+      const ny = parseWord(line, "Y");
+
+      const prevX = x, prevY = y;
+      const prevHadX = hasX, prevHadY = hasY;
+
+      if (nx !== null) { x = nx; hasX = true; }
+      if (ny !== null) { y = ny; hasY = true; }
+
+      const hasMoveCoords = (nx !== null) || (ny !== null);
+      if (currentMotion && hasMoveCoords && prevHadX && prevHadY){
+        // create segment from prev to current
+        const isRapid = currentMotion === "G0";
+        segs.push({ x1: prevX, y1: prevY, x2: x, y2: y, rapid: isRapid });
+
+        minX = Math.min(minX, prevX, x);
+        minY = Math.min(minY, prevY, y);
+        maxX = Math.max(maxX, prevX, x);
+        maxY = Math.max(maxY, prevY, y);
+      }
+    }
+
+    if (!segs.length){
+      minX = minY = maxX = maxY = 0;
+    }
+
+    return {
+      segs,
+      bounds: { minX, minY, maxX, maxY },
+      head: { x, y },
+    };
+  }
+
+  function drawPreview(){
+    const gcodeText = gcodeEl.value || "";
+    const { segs, bounds, head } = buildPreviewFromGcode(gcodeText);
+
+    // Canvas coordinate system
+    const w = canvas.width;
+    const h = canvas.height;
+    ctx.clearRect(0, 0, w, h);
+
+    // Background subtle grid
+    const pad = 46;
+
+    const gridEnabled = chkGrid.checked;
+    const headEnabled = chkHead.checked;
+
+    // compute transform
+    const spanX = bounds.maxX - bounds.minX || 1;
+    const spanY = bounds.maxY - bounds.minY || 1;
+
+    const innerW = w - pad*2;
+    const innerH = h - pad*2;
+
+    // Keep aspect ratio
+    const scale = Math.min(innerW / spanX, innerH / spanY);
+
+    const cx = (bounds.minX + bounds.maxX) / 2;
+    const cy = (bounds.minY + bounds.maxY) / 2;
+
+    function toCanvas(px, py){
+      // center and invert Y
+      const xNorm = (px - cx) * scale;
+      const yNorm = (py - cy) * scale;
+      return {
+        x: pad + innerW/2 + xNorm,
+        y: pad + innerH/2 - yNorm
+      };
+    }
+
+    // draw grid + axes
+    if (gridEnabled){
+      ctx.save();
+      ctx.globalAlpha = 0.35;
+
+      // grid lines
+      const step = chooseGridStep(spanX, spanY);
+      const min = bounds;
+      const max = bounds;
+
+      // vertical
+      ctx.strokeStyle = "rgba(255,255,255,.10)";
+      ctx.lineWidth = 1;
+      for (let xg = Math.floor(min.minX/step)*step; xg <= max.maxX; xg += step){
+        const p = toCanvas(xg, min.minY);
+        const p2 = toCanvas(xg, max.maxY);
+        ctx.beginPath();
+        ctx.moveTo(p.x, p.y);
+        ctx.lineTo(p2.x, p2.y);
+        ctx.stroke();
+      }
+      // horizontal
+      for (let yg = Math.floor(min.minY/step)*step; yg <= max.maxY; yg += step){
+        const p = toCanvas(min.minX, yg);
+        const p2 = toCanvas(max.maxX, yg);
+        ctx.beginPath();
+        ctx.moveTo(p.x, p.y);
+        ctx.lineTo(p2.x, p2.y);
+        ctx.stroke();
+      }
+
+      // axes (X=0, Y=0) if inside bounds
+      ctx.globalAlpha = 0.9;
+      ctx.strokeStyle = "rgba(110,168,254,.55)";
+      ctx.setLineDash([]);
+      ctx.lineWidth = 2;
+
+      const zeroX = 0, zeroY = 0;
+      if (zeroX >= bounds.minX && zeroX <= bounds.maxX){
+        const a = toCanvas(zeroX, bounds.minY);
+        const b = toCanvas(zeroX, bounds.maxY);
+        ctx.beginPath();
+        ctx.moveTo(a.x, a.y);
+        ctx.lineTo(b.x, b.y);
+        ctx.stroke();
+      }
+      if (zeroY >= bounds.minY && zeroY <= bounds.maxY){
+        const a = toCanvas(bounds.minX, zeroY);
+        const b = toCanvas(bounds.maxX, zeroY);
+        ctx.beginPath();
+        ctx.moveTo(a.x, a.y);
+        ctx.lineTo(b.x, b.y);
+        ctx.stroke();
+      }
+
+      ctx.restore();
+
+      // labels
+      ctx.save();
+      ctx.fillStyle = "rgba(169,180,208,.95)";
+      ctx.font = "12px " + getComputedStyle(document.body).fontFamily;
+
+      // min/max labels
+      ctx.fillText("minX: " + round1(bounds.minX), pad+6, h-pad+18);
+      ctx.fillText("maxX: " + round1(bounds.maxX), w-pad-80, h-pad+18);
+      ctx.fillText("minY: " + round1(bounds.minY), pad-78, h-pad-6);
+      ctx.fillText("maxY: " + round1(bounds.maxY), pad-78, pad+14);
+
+      ctx.restore();
+    }
+
+    // draw segments
+    ctx.save();
+    for (const s of segs){
+      const p1 = toCanvas(s.x1, s.y1);
+      const p2 = toCanvas(s.x2, s.y2);
+
+      ctx.beginPath();
+      ctx.moveTo(p1.x, p1.y);
+      ctx.lineTo(p2.x, p2.y);
+
+      if (s.rapid){
+        ctx.setLineDash([7, 7]);
+        ctx.strokeStyle = "rgba(169,180,208,.65)";
+        ctx.lineWidth = 2;
+      } else {
+        ctx.setLineDash([]);
+        ctx.strokeStyle = "rgba(45,212,191,.85)";
+        ctx.lineWidth = 3;
+      }
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    // head marker
+    if (headEnabled){
+      ctx.save();
+      const p = toCanvas(head.x, head.y);
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 7, 0, Math.PI*2);
+      ctx.fillStyle = "rgba(110,168,254,.95)";
+      ctx.fill();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = "rgba(0,0,0,.45)";
+      ctx.stroke();
+
+      // label
+      ctx.font = "12px " + getComputedStyle(document.body).fontFamily;
+      ctx.fillStyle = "rgba(233,238,252,.95)";
+      ctx.fillText(`X:${round1(head.x)} Y:${round1(head.y)}`, p.x + 10, p.y - 10);
+
+      ctx.restore();
+    }
+
+    bbInfo.textContent = `X:[${round1(bounds.minX)}, ${round1(bounds.maxX)}], Y:[${round1(bounds.minY)}, ${round1(bounds.maxY)}]`;
+    segInfo.textContent = String(segs.length);
+    drawInfo.textContent = new Date().toLocaleTimeString();
+  }
+
+  function round1(v){
+    if (!Number.isFinite(v)) return "—";
+    // keep reasonable precision
+    return Math.abs(v) < 10 ? v.toFixed(2) : v.toFixed(1);
+  }
+
+  function chooseGridStep(spanX, spanY){
+    const span = Math.max(spanX, spanY);
+    // choose step from [1,2,5,10,20,50,100...] roughly
+    const rough = span / 8;
+    const pow = Math.pow(10, Math.floor(Math.log10(rough)));
+    const candidates = [1,2,5,10].map(m => m * pow);
+    let best = candidates[0];
+    for (const c of candidates){
+      if (Math.abs(c - rough) < Math.abs(best - rough)) best = c;
+    }
+    return best || 1;
+  }
+
+  // Update preview button
+  btnPreview.addEventListener("click", () => {
+    drawPreview();
+    log("Превью обновлено.");
+  });
+
+  btnUseDemo.addEventListener("click", () => {
+    gcodeEl.value = `; demo
+G21
+G90
+G0 X0 Y0
+G0 X10 Y0
+G1 X10 Y10 F1200
+G1 X0 Y10
+G1 X0 Y0
+G0 X15 Y5
+G1 X25 Y5
+G1 X25 Y15
+G1 X15 Y15
+G1 X15 Y5
+`;
+    drawPreview();
+    log("Загружен демо G-code и обновлено превью.");
+  });
+
+  // Send/stop remains the same
+  function requestStop(){
+    if (!sending) return;
+    stopRequested = true;
+    log("Запрос на остановку...");
+  }
+
+  async function send(){
+    if (!port || !writer){
+      alert("Сначала подключите Serial порт.");
+      return;
+    }
+
+    const delayMs = Number(delayEl.value || 10);
+    if (!Number.isFinite(delayMs) || delayMs < 0){
+      alert("Некорректная задержка");
+      return;
+    }
+
+    const lines = extractLines(gcodeEl.value);
+    if (!lines.length){
+      alert("G-code пустой (после очистки).");
+      return;
+    }
+
+    sending = true;
+    stopRequested = false;
+
+    btnSend.disabled = true;
+    btnStop.disabled = false;
+
+    log(`Старт отправки: строк=${lines.length}, delay=${delayMs}ms`);
+
+    try{
+      for (let i = 0; i < lines.length; i++){
+        if (stopRequested) break;
+        const line = lines[i];
+
+        await writeLine(line);
+        log(`>> ${line}`);
+
+        if (delayMs > 0) await sleep(delayMs);
+      }
+
+      if (stopRequested){
+        log("Отправка остановлена пользователем.");
+      } else {
+        log("Отправка завершена.");
+      }
+    } catch (e){
+      console.error(e);
+      log("Ошибка отправки: " + (e?.message || e));
+    } finally{
+      sending = false;
+      stopRequested = false;
+      btnStop.disabled = true;
+      btnSend.disabled = false;
+    }
+  }
+
+  btnConnect.addEventListener("click", connect);
+  btnDisconnect.addEventListener("click", disconnect);
+  btnSend.addEventListener("click", send);
+  btnStop.addEventListener("click", requestStop);
+
+  // Update preview on paste / typing (debounced)
+  let tmr = null;
+  gcodeEl.addEventListener("input", () => {
+    clearTimeout(tmr);
+    tmr = setTimeout(() => drawPreview(), 600);
+  });
+
+  // init demo
+  gcodeEl.value = `; Пример G-code
+G21
+G90
+G0 X0 Y0
+G1 X50 Y0 Z0 F1500
+G1 X50 Y50 Z0
+G1 X0 Y50 Z0
+G1 X0 Y0 Z0
+G0 X10 Y10
+G1 X40 Y10
+G1 X40 Y40
+G1 X10 Y40
+G1 X10 Y10
+M30
+`;
+  setConnected(false);
+  drawPreview();
+</script>
+</body>
+</html>
