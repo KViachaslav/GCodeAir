@@ -17,7 +17,6 @@ def send_gcode(ip, port, filename):
                     print(f"Отправка: {command}")
                     s.sendall((command + '\n').encode())
 
-                    # Ждем подтверждения от станка (GRBL обычно присылает 'ok')
                     response = s.recv(1024).decode()
                     print(f"Ответ: {response.strip()}")
 
