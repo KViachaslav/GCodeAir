@@ -502,7 +502,7 @@
   }
 
 
-  socket = new WebSocket(`${IPEl.value}:${Port.value}`);
+  socket = new WebSocket(`ws://${IPEl.value}:${PortEl.value}`);
   socket.binaryType = "arraybuffer";
   
   await new Promise((resolve, reject) => {
@@ -962,3 +962,4 @@ M30
 </script>
 </body>
 </html>
+

@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>G-code Processor</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px; }
+        textarea { width: 100%; height: 150px; margin-bottom: 10px; }
+        .log { 
+            border: 1px solid #ccc; 
+            padding: 10px; 
+            background: #f9f9f9; 
+            min-height: 50px; 
+            margin-top: 20px;
+            white-space: pre-wrap; /* Сохраняет переносы строк */
+        }
+        button { padding: 10px 20px; cursor: pointer; background: #007bff; color: white; border: none; }
+    </style>
+</head>
+<body>
+
+    <h2>Обработчик G-кода</h2>
+    
+    <textarea id="gcode" spellcheck="false" placeholder="Вставьте сюда ваш G-code..."></textarea>
+    <br>
+    <button id="sendBtn">Преобразовать</button>
+    <button id="connect">connect</button>
+    <h3>Лог ответов:</h3>
+    <div class="log" id="log"></div>
+
+    <script>
+       document.getElementById('sendBtn').addEventListener('click', async () => {
+    const gcodeText = document.getElementById('gcode').value;
+    const logDiv = document.getElementById('log');
+    
+    // Разбиваем текст на массив строк и фильтруем пустые
+    const lines = gcodeText.split('\n').map(line => line.trim()).filter(line => line.length > 0);
+    
+    logDiv.innerHTML = "Начинаю поочередную обработку...<br>";
+
+    for (const line of lines) {
+        try {
+            // Создаем временный элемент для индикации текущей строки
+            const statusMsg = document.createElement('div');
+            statusMsg.style.color = 'gray';
+            statusMsg.innerText = `Отправка: ${line}...`;
+            logDiv.appendChild(statusMsg);
+
+            const response = await fetch('/process', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ gcode: line }) // Отправляем ОДНУ строку
+            });
+
+            if (!response.ok) throw new Error(`Ошибка сервера: ${response.status}`);
+
+            const data = await response.json();
+
+            // Убираем статус "отправка" и пишем результат
+            statusMsg.style.color = 'black';
+            statusMsg.innerHTML = `✅ ${line} -> <b>${data.result}</b>`;
+            
+            // Автопрокрутка лога вниз
+            logDiv.scrollTop = logDiv.scrollHeight;
+
+        } catch (error) {
+            const errorMsg = document.createElement('div');
+            errorMsg.style.color = 'red';
+            errorMsg.innerText = `❌ Ошибка на строке "${line}": ${error.message}`;
+            logDiv.appendChild(errorMsg);
+            
+            // Если произошла ошибка, можно прервать цикл (break) или продолжить (continue)
+            break; 
+        }
+    }
+    
+    logDiv.innerHTML += "<br><b>Обработка завершена.</b>";
+});
+
+
+
+async function resetMachine() {
+    const response = await fetch('/reset'); 
+    const data = await response.json();
+    console.log(data.status);
+}
+
+document.getElementById('connect').addEventListener('click', async () => {
+    resetMachine();
+});
+    </script>
+</body>
+</html>
