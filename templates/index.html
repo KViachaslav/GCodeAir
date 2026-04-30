@@ -486,20 +486,32 @@
   let stop = false;
 
   async function connectToESP() {
+    log(IPEl.value);
+    log(PortEl.value);
     const response = await fetch('/connect', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ip: IPEl.value,port:PortEl.value }) 
     });
-
-    if (!response.ok) throw new Error(`Ошибка сервера: ${response.status}`);
-
+    
+    // if (!response.ok) throw new Error(`Ошибка сервера: ${response.status}`);
+    if (!response.ok){
+      const errorData = await response.json();
+      log(response.status);
+      log(errorData.message);
+      // console.error("Код ошибки:", response.status); // 408
+      // console.error("Сообщение:", errorData.message); // "Connection timed out"
+      return;
+    }
+    else{
     const data = await response.json();
+    log(data.status);
     if(data.status==="connect"){
       setConnected(true,`${IPEl.value}:${PortEl.value}`);
     }
     console.log(data.status);
     log(data.status);
+  }
   }
   async function disconnectESP() {
     const response = await fetch('/disconnect'); 
@@ -581,87 +593,8 @@
   socket.send(line + "\n");
   }
 
-  async function connect() {
-  setConnected(true,`${IPEl.value}:${PortEl.value}`);
-  if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
-    return socket;
-  }
-
-
-  socket = new WebSocket(`ws://${IPEl.value}:${PortEl.value}`);
-  socket.binaryType = "arraybuffer";
+ 
   
-  await new Promise((resolve, reject) => {
-    socket.addEventListener("open", resolve, { once: true });
-    socket.addEventListener("error", reject, { once: true });
-  });
-
-  return socket;
-  }
-  // async function connect(){
-  //   if (!("serial" in navigator)){
-  //     alert("Ваш браузер не поддерживает Web Serial API. Используйте Chrome/Edge.");
-  //     return;
-  //   }
-
-  //   try{
-  //     port = await navigator.serial.requestPort();
-  //     const baud = Number(baudEl.value || "115200");
-  //     if (!Number.isFinite(baud) || baud <= 0){
-  //       alert("Некорректный baud rate");
-  //       return;
-  //     }
-  //     await port.open({ baudRate: baud });
-  //     writer = port.writable.getWriter();
-
-  //     setConnected(true, `COM/USB: baud=${baud}`);
-  //     log("Порт открыт. Готов к отправке.");
-  //   } catch (e){
-  //     console.error(e);
-  //     setConnected(false, "Ошибка подключения");
-  //     log("Ошибка подключения: " + (e?.message || e));
-  //   }
-  // }
-
-  // async function disconnect(){
-  //   stopRequested = true;
-  //   sending = false;
-
-  //   btnSend.disabled = true;
-  //   btnStop.disabled = true;
-
-
-  //   if (!socket) return;
-
-  //   // закрываем аккуратно
-  //   if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
-  //     socket.close(code, reason);
-  //   }
-
-  // socket = null;
-  // setConnected(false);
-  //   // try{
-  //   //   if (writer){
-  //   //     try { await writer.releaseLock(); } catch {}
-  //   //   }
-  //   //   if (port){
-  //   //     await port.close();
-  //   //   }
-  //   //   writer = null;
-  //   //   port = null;
-  //   //   log("Порт закрыт.");
-  //   // } catch (e){
-  //   //   console.error(e);
-  //   //   log("Ошибка отключения: " + (e?.message || e));
-  //   // } finally{
-  //   //   stopRequested = false;
-  //   //   sending = false;
-  //   //   btnStop.disabled = true;
-  //   //   btnSend.disabled = false; // можно снова отправлять после подключения, но мы отключили
-  //   //   setConnected(false);
-  //   // }
-  // }
-
   function parseWord(line, letter){
     // пример: X12.34, Y-5, G1
     const re = new RegExp(letter + "\\s*([-+]?\\d*\\.?\\d+)", "i");
@@ -961,6 +894,7 @@ G1 X15 Y5
 });
 
   document.getElementById('btnSend').addEventListener('click', async () => {
+    stop = false;
     const gcodeText = document.getElementById('gcode').value;
     // const logDiv = document.getElementById('log');
     
@@ -988,19 +922,14 @@ G1 X15 Y5
 
             const data = await response.json();
             log(`✅${line}`);
-            // Убираем статус "отправка" и пишем результат
-            // statusMsg.style.color = 'black';
-            // statusMsg.innerHTML = `✅ ${line} -> <b>${data.result}</b>`;
             
-            // // Автопрокрутка лога вниз
-            // logDiv.scrollTop = logDiv.scrollHeight;
 
         } catch (error) {
-            const errorMsg = document.createElement('div');
-            errorMsg.style.color = 'red';
-            errorMsg.innerText = `❌ Ошибка на строке "${line}": ${error.message}`;
-            // logDiv.appendChild(errorMsg);
-            log(`❌ Ошибка на строке "${line}": ${error.message}`);
+            // const errorMsg = document.createElement('div');
+            // errorMsg.style.color = 'red';
+            // errorMsg.innerText = `❌ Ошибка на строке "${line}": ${error.message}`;
+            
+            log(`❌"${line}": ${error.message}`);
             // Если произошла ошибка, можно прервать цикл (break) или продолжить (continue)
             break; 
         }

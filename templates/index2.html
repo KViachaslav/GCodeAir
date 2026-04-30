@@ -1,67 +1,255 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>CNC Control Panel</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #1a1a1a; font-family: sans-serif; }
+        
+       
 
-
-
-
-
-
-<canvas id="c"></canvas>
-
-
-
-
-
-<script>
-  const canvas = document.getElementById("c");
-  const ctx = canvas.getContext("2d");
-
-  async function load() {
-    const res = await fetch("/api/drawing", { cache: "no-store" });
-    const data = await res.json();
-
-    canvas.width = data.width;
-    canvas.height = data.height;
-
-    // белый фон
-    ctx.fillStyle = "#fff";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-    for (const item of data.items) {
-      if (item.type === "line") {
-        ctx.strokeStyle = item.stroke || "#000";
-        ctx.lineWidth = item.w || 1;
-        ctx.beginPath();
-        ctx.moveTo(item.x1, item.y1);
-        ctx.lineTo(item.x2, item.y2);
-        ctx.stroke();
-      }
-
-      if (item.type === "circle") {
-        ctx.strokeStyle = item.stroke || "#000";
-        ctx.lineWidth = item.w || 1;
-        ctx.beginPath();
-        ctx.arc(item.cx, item.cy, item.r, 0, Math.PI * 2);
-        ctx.stroke();
-      }
-
-      if (item.type === "poly") {
-        ctx.strokeStyle = item.stroke || "#000";
-        ctx.lineWidth = item.w || 1;
-
-        ctx.beginPath();
-        const [p0, ...rest] = item.points;
-        ctx.moveTo(p0[0], p0[1]);
-        for (const p of rest) ctx.lineTo(p[0], p[1]);
-        ctx.closePath();
-
-        if (item.fill) {
-          ctx.fillStyle = item.fill;
-          ctx.fill();
+        .btn {
+            background: #444;
+            color: white;
+            border: 1px solid #666;
+            padding: 8px 15px;
+            margin-right: 10px;
+            cursor: pointer;
+            transition: 0.2s;
         }
-        ctx.stroke();
-      }
+
+        .btn:hover { background: #666; }
+        .btn-blue { background: #007bff; border-color: #0056b3; }
+        
+        #file-input { display: none; }
+    </style>
+</head>
+<body>
+
+    <style>
+    /* Контейнер верхнего меню */
+    #menu-bar {
+        position: absolute;
+        top: 0; left: 0; right: 0;
+        background: #f0f0f0; /* Классический серый цвет десктопа */
+        display: flex;
+        font-size: 14px;
+        border-bottom: 1px solid #ccc;
+        z-index: 1000;
+        user-select: none;
     }
-  }
 
-  load();
-</script>
+    /* Главные пункты меню */
+    .menu-item {
+        position: relative;
+        padding: 5px 15px;
+        cursor: default;
+    }
 
+    .menu-item:hover {
+        background: #0078d7; /* Синий цвет выделения */
+        color: white;
+    }
+
+    /* Выпадающий список */
+    .dropdown {
+        display: none;
+        position: absolute;
+        top: 100%;
+        left: 0;
+        background: white;
+        color: black;
+        box-shadow: 2px 2px 5px rgba(0,0,0,0.2);
+        min-width: 180px;
+        border: 1px solid #ccc;
+    }
+
+    .menu-item:hover .dropdown {
+        display: block;
+    }
+
+    /* Пункты внутри выпадающего списка */
+    .dropdown-item {
+        padding: 8px 12px;
+        cursor: pointer;
+    }
+
+    .dropdown-item:hover {
+        background: #e5e5e5;
+        color: black;
+    }
+
+    /* Разделитель */
+    .divider {
+        height: 1px;
+        background: #ccc;
+        margin: 4px 0;
+    }
+
+    /* Скрытый инпут для файлов */
+    #file-input { display: none; }
+</style>
+
+<div id="menu-bar">
+    <div class="menu-item">
+        Файл
+        <div class="dropdown">
+            <div class="dropdown-item" onclick="document.getElementById('file-input').click()">Открыть G-код...</div>
+            <div class="divider"></div>
+            <div class="dropdown-item" onclick="location.reload()">Очистить сцену</div>
+            <div class="dropdown-item" onclick="window.close()">Выход</div>
+        </div>
+    </div>
+    
+    <div class="menu-item">
+        Управление
+        <div class="dropdown">
+            <div class="dropdown-item" onclick="callPython('home')">В начало (Home)</div>
+            <div class="dropdown-item" onclick="callPython('probe')">Калибровка (Z-Probe)</div>
+            <div class="divider"></div>
+            <div class="dropdown-item" onclick="callPython('stop')" style="color: red;">Экстренный стоп</div>
+        </div>
+    </div>
+
+    <div class="menu-item">
+        Вид
+        <div class="dropdown">
+            <div class="dropdown-item" onclick="resetCamera()">Сбросить камеру</div>
+            <div class="dropdown-item" onclick="toggleGrid()">Скрыть/Показать сетку</div>
+        </div>
+    </div>
+
+    <div class="menu-item">
+        Справка
+        <div class="dropdown">
+            <div class="dropdown-item" onclick="alert('CNC Viewer v1.0\nFlask + Three.js')">О программе</div>
+        </div>
+    </div>
+</div>
+
+<input type="file" id="file-input" accept=".gcode">
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        // Инициализация Three.js (базовый код из предыдущего ответа)
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        const controls = new OrbitControls(camera, renderer.domElement);
+        camera.position.set(50, 50, 50);
+        
+        const grid = new THREE.GridHelper(100, 20, 0x444444, 0x222222);
+        grid.rotation.x = Math.PI / 2;
+        scene.add(grid);
+
+        // Объект для хранения линии траектории
+        let currentPath;
+
+        // --- ФУНКЦИЯ ВЫЗОВА PYTHON ---
+        window.callPython = async (action) => {
+            try {
+                const response = await fetch('/api/command', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ action: action })
+                });
+                const data = await response.json();
+                alert("Ответ от Python: " + data.message);
+            } catch (e) {
+                console.error("Ошибка при связи с Flask", e);
+            }
+        };
+
+        // --- ЛОГИКА ЧТЕНИЯ ФАЙЛА ---
+        document.getElementById('file-input').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const text = e.target.result;
+                console.log("Файл прочитан, начинаем парсинг...");
+                drawPathFromGCode(text);
+            };
+            reader.readAsText(file);
+        });
+
+        function drawPathFromGCode(content) {
+            // Удаляем старую траекторию, если есть
+            if (currentPath) scene.remove(currentPath);
+
+            const points = [];
+            const lines = content.split('\n');
+
+            // Простейший парсер G-кода (только G0/G1 X... Y... Z...)
+            lines.forEach(line => {
+                const xMatch = line.match(/X([-+]?[0-9]*\.?[0-9]+)/);
+                const yMatch = line.match(/Y([-+]?[0-9]*\.?[0-9]+)/);
+                const zMatch = line.match(/Z([-+]?[0-9]*\.?[0-9]+)/);
+
+                if (xMatch || yMatch || zMatch) {
+                    // Берем предыдущие значения, если текущие не указаны
+                    const prev = points.length > 0 ? points[points.length - 1] : {x:0, y:0, z:0};
+                    const x = xMatch ? parseFloat(xMatch[1]) : prev.x;
+                    const y = yMatch ? parseFloat(yMatch[1]) : prev.y;
+                    const z = zMatch ? parseFloat(zMatch[1]) : prev.z;
+                    points.push(new THREE.Vector3(x, y, z));
+                }
+            });
+
+            if (points.length > 0) {
+                const geometry = new THREE.BufferGeometry().setFromPoints(points);
+                const material = new THREE.LineBasicMaterial({ color: 0x00ffff });
+                currentPath = new THREE.Line(geometry, material);
+                scene.add(currentPath);
+            }
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            renderer.render(scene, camera);
+        }
+        animate();
+
+        // Функция сброса камеры (Вид -> Сбросить камеру)
+window.resetCamera = () => {
+    camera.position.set(50, 50, 50);
+    controls.target.set(0, 0, 0);
+    controls.update();
+};
+
+// Показать/скрыть сетку
+let gridVisible = true;
+window.toggleGrid = () => {
+    gridVisible = !gridVisible;
+    grid.visible = gridVisible;
+};
+
+// Вызов Python (уже был у нас ранее)
+window.callPython = async (action) => {
+    console.log(`Отправка команды: ${action}`);
+    const response = await fetch('/api/command', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ action: action })
+    });
+    const data = await response.json();
+    console.log("Ответ сервера:", data.message);
+};
+    </script>
+</body>
+</html>

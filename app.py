@@ -2,55 +2,87 @@ from flask import Flask, render_template, request, jsonify
 import time
 import socket
 app = Flask(__name__)
-s = 0
+s = None
+def get_socket():
+    global s
+    if s is None:
+        # Создаем сокет, если он еще не создан
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        # Устанавливаем таймаут, чтобы Flask не завис вечно при ожидании ответа
+        s.settimeout(2.0)
+    return s
 @app.get("/")
 def index():
-    return render_template("index.html")
+    return render_template("index1.html")
 @app.route('/send', methods=['POST'])
 def process_gcode():
-    try:
-        data = request.get_json()
-        if not data:
-            return jsonify({'result': 'No data'}), 400
-            
-        line = data.get('gcode', '')
-        s.sendall((line + '\n').encode())
-        response = s.recv(1024).decode()
+    global s
+    if s is None:
+        return jsonify({"error": "Socket not initialized"}), 400
+    
+    try:    
+        data = request.get_json().get('gcode', '')
+        # data = request.json.get('gcode', '')
+        s.sendall((data + '\n').encode('utf-8'))
         
-        return jsonify({'result': response.strip()})
-        
+        # Получаем ответ (если станок что-то присылает)
+        response = s.recv(1024).decode('utf-8')
+        return jsonify({"result": response})
     except Exception as e:
-        
-        return jsonify({'result': f'Error: {str(e)}'}), 500
+        return jsonify({"error": str(e)}), 500
+   
     
 @app.route('/connect', methods=['POST'])
 def connectESP():
+    global s
+    sock = None
     try:
         data = request.get_json()
-        if not data:
-            return jsonify({'result': 'No data'}), 400
+        ip = data.get('ip', '')
+        port = data.get('port', '')
+
+        if not ip or not port:
+            return jsonify({"status": "error", "message": "IP or Port missing"}), 400
+
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(3.0) 
         
-
-
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-       
-        s.connect((data.get('ip', ''), data.get('port', ''))) 
-
-
-
-        print(data.get('ip', ''),data.get('port', ''))
+        # 2. Пытаемся подключиться
+        sock.connect((ip, int(port)))
+        if s:
+            try: s.close() 
+            except: pass
+            
+        s = sock
+        # Убираем таймаут для последующей работы, если нужно
+        s.settimeout(None)
         return jsonify({"status": "connect"})
-        
-    except Exception as e:
-        
-        return jsonify({'result': f'Error: {str(e)}'}), 500
-    # return jsonify({"status": "connect"})
 
+    except socket.timeout:
+
+        return jsonify({"status": "error", "message": "Connection timed out"}), 408
+    except socket.error as e:
+        
+        return jsonify({"status": "error", "message": f"Socket error: {e}"}), 503
+    except Exception as e:
+        s = None
+        return jsonify({"status": "error", "message": str(e)}), 500
+    finally:
+        # Проверяем, был ли сокет создан, прежде чем менять его настройки
+        if sock is not None:
+            sock.settimeout(None)
+    
 
 
 @app.route('/disconnect')
 def disconnectESP():
-    s.close()
+    # global s
+    # s.close()
+    # return jsonify({"status": "disconnect"})
+    global s
+    if s:
+        s.close()
+        s = None
     return jsonify({"status": "disconnect"})
 
 @app.get("/api/drawing")
