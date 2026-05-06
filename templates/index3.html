@@ -1,0 +1,630 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>G-code 3D визуализатор | Flask + Three.js</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        /* Верхнее выпадающее меню */
+        .navbar {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            background: rgba(30, 30, 40, 0.85);
+            backdrop-filter: blur(8px);
+            color: white;
+            padding: 8px 20px;
+            z-index: 100;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+            box-sizing: border-box;
+        }
+        .navbar h2 {
+            margin: 0;
+            font-size: 1.2rem;
+            letter-spacing: 1px;
+        }
+        .file-menu {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+        }
+        .file-menu button, .file-menu label {
+            background: #2c3e66;
+            border: none;
+            color: white;
+            padding: 6px 14px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            transition: 0.2s;
+            font-family: inherit;
+        }
+        .file-menu button:hover, .file-menu label:hover {
+            background: #1e2a4a;
+        }
+        #fileInput {
+            display: none;
+        }
+
+        /* Левое окно (код) и правое окно (кнопки) */
+        .panel-left {
+            position: absolute;
+            top: 60px;
+            left: 15px;
+            width: 320px;
+            bottom: 15px;
+            background: rgba(20, 20, 30, 0.85);
+            backdrop-filter: blur(12px);
+            border-radius: 12px;
+            color: #eee;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            z-index: 50;
+            border: 1px solid rgba(255,255,255,0.2);
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+        }
+        .panel-right {
+            position: absolute;
+            top: 60px;
+            right: 15px;
+            width: 260px;
+            bottom: 15px;
+            background: rgba(20, 20, 30, 0.85);
+            backdrop-filter: blur(12px);
+            border-radius: 12px;
+            color: #eee;
+            padding: 15px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            z-index: 50;
+            border: 1px solid rgba(255,255,255,0.2);
+            overflow-y: auto;
+        }
+        .panel-header {
+            padding: 12px 15px;
+            background: rgba(0,0,0,0.5);
+            font-weight: bold;
+            border-bottom: 1px solid rgba(255,255,255,0.2);
+        }
+        .code-area {
+            flex: 1;
+            overflow: auto;
+            padding: 12px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            white-space: pre-wrap;
+            word-break: break-all;
+            background: rgba(0,0,0,0.3);
+        }
+        .btn-group {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        button.action-btn {
+            background: #3a6ea5;
+            border: none;
+            color: white;
+            padding: 10px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: 0.2s;
+        }
+        button.action-btn:hover {
+            background: #2c4d73;
+            transform: scale(1.02);
+        }
+        .checkbox-group {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-top: 5px;
+        }
+        .checkbox-group label {
+            cursor: pointer;
+        }
+        hr {
+            border-color: rgba(255,255,255,0.2);
+            margin: 8px 0;
+        }
+        .info-text {
+            font-size: 12px;
+            color: #ccc;
+            text-align: center;
+        }
+        /* Индикатор загрузки */
+        .status {
+            font-size: 11px;
+            background: #000000aa;
+            padding: 4px 8px;
+            border-radius: 20px;
+            display: inline-block;
+        }
+
+        @media (max-width: 700px) {
+            .panel-left, .panel-right { width: 260px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="navbar">
+        <h2>🖨️ G-code 3D визуализатор | Three.js</h2>
+        <div class="file-menu">
+            <label for="fileInput">📁 Загрузить G-code</label>
+            <input type="file" id="fileInput" accept=".gcode,.txt,.nc">
+            <button id="exampleBtn">📌 Пример (куб)</button>
+            <span class="status" id="statusMsg">Готов</span>
+        </div>
+    </div>
+
+    <!-- Левая панель: просмотр кода -->
+    <div class="panel-left">
+        <div class="panel-header">📄 G-код (содержимое)</div>
+        <div class="code-area" id="gcodeViewer">Нет загруженного G-кода. Загрузите файл или нажмите "Пример".</div>
+    </div>
+
+    <!-- Правая панель: кнопки и чекбоксы -->
+    <div class="panel-right">
+        <div class="btn-group">
+            <button class="action-btn" id="renderBtn">🎨 Построить траекторию</button>
+            <button class="action-btn" id="clearBtn">🧹 Очистить линии</button>
+            <button class="action-btn" id="centerViewBtn">🎯 Центрировать камеру</button>
+        </div>
+        <hr>
+        <div class="checkbox-group">
+            <input type="checkbox" id="showAxes" checked> <label>Показать оси</label>
+        </div>
+        <div class="checkbox-group">
+            <input type="checkbox" id="showGrid" checked> <label>Показать сетку</label>
+        </div>
+        <div class="checkbox-group">
+            <input type="checkbox" id="wireframeMode"> <label>Каркасный режим</label>
+        </div>
+        <hr>
+        <div class="info-text">
+            🧠 Поддерживаются G0/G1 с X,Y,Z<br>
+            Цвет траектории: радужный градиент<br>
+            (по порядку команд)
+        </div>
+    </div>
+
+    <!-- Подключение Three.js и дополнений -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.128.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.128.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
+
+        // --- Инициализация сцены ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x050b1a);
+        // scene.fog = new THREE.FogExp2(0x050b1a, 0.001); туман ебучий
+
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(80, 60, 100);
+        camera.lookAt(0, 0, 0);
+
+
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true; // для эффекта
+        document.body.appendChild(renderer.domElement);
+
+
+
+
+        
+
+        // CSS2 рендер для маленьких меток (опционально)
+        const labelRenderer = new CSS2DRenderer();
+        labelRenderer.setSize(window.innerWidth, window.innerHeight);
+        labelRenderer.domElement.style.position = 'absolute';
+        labelRenderer.domElement.style.top = '0px';
+        labelRenderer.domElement.style.left = '0px';
+        labelRenderer.domElement.style.pointerEvents = 'none';
+        document.body.appendChild(labelRenderer.domElement);
+
+        // --- Контролы ---
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.autoRotate = false;
+        controls.enableZoom = true;
+        controls.zoomSpeed = 1.2;
+        controls.target.set(0, 0, 0);
+
+        // --- Вспомогательные объекты (оси/сетка) ---
+        let axesHelper = new THREE.AxesHelper(50);
+        let gridHelper = new THREE.GridHelper(200, 40, 0x88aaff, 0x335588);
+        scene.add(gridHelper);
+        scene.add(axesHelper);
+        
+        // Чекбоксы управления
+        const showAxesCheck = document.getElementById('showAxes');
+        const showGridCheck = document.getElementById('showGrid');
+        const wireframeCheck = document.getElementById('wireframeMode');
+        
+        showAxesCheck.addEventListener('change', (e) => {
+            axesHelper.visible = e.target.checked;
+        });
+        showGridCheck.addEventListener('change', (e) => {
+            gridHelper.visible = e.target.checked;
+        });
+        
+        // --- Хранилище линий траектории ---
+        let currentLinesGroup = null;
+        
+        // Функция удаления текущей траектории
+        function clearTrajectory() {
+            if (currentLinesGroup) {
+                scene.remove(currentLinesGroup);
+                // очистка геометрий и материалов для избежания утечек
+                if (currentLinesGroup.children) {
+                    currentLinesGroup.children.forEach(child => {
+                        if (child.isLine) {
+                            child.geometry.dispose();
+                            child.material.dispose();
+                        }
+                    });
+                }
+                currentLinesGroup = null;
+            }
+        }
+        
+
+
+
+
+
+
+
+
+
+
+
+
+
+function parseAndCreateLines(gcodeText) {
+    const lines = gcodeText.split(/\r?\n/);
+    const points = []; // массив {x,y,z, type} - type: 'G0' или 'G1'
+    let currentX = 0, currentY = 0, currentZ = 0;
+    let lastGCode = null;
+    let lastPointType = 'G1';
+    let lastMoveWasG0 = false; // Флаг для отслеживания последнего движения
+    
+    // ПЕРВЫЙ ПРОХОД: сбор всех точек движения с определением типа движения
+    for (let raw of lines) {
+        raw = raw.trim();
+        if (raw === "") continue;
+        
+        // Удаляем комментарии
+        const codeWithoutComment = raw.split(';')[0].toUpperCase().trim();
+        if (codeWithoutComment === "") continue;
+        
+        // Ищем G команду в строке
+        let gMatch = codeWithoutComment.match(/G(?:0|1|2|3)?\d*/i);
+        let currentGCode = null;
+        
+        if (gMatch) {
+            currentGCode = gMatch[0].toUpperCase();
+            lastGCode = currentGCode;
+            if (currentGCode === 'G0') {
+                lastPointType = 'G0';
+                lastMoveWasG0 = true;
+            } else if (currentGCode === 'G1') {
+                lastPointType = 'G1';
+                lastMoveWasG0 = false;
+            }
+        }
+        
+        // Извлекаем координаты
+        let x = null, y = null, z = null;
+        const xMatch = codeWithoutComment.match(/X([+-]?\d*\.?\d+)/i);
+        const yMatch = codeWithoutComment.match(/Y([+-]?\d*\.?\d+)/i);
+        const zMatch = codeWithoutComment.match(/Z([+-]?\d*\.?\d+)/i);
+        
+        if (xMatch) x = parseFloat(xMatch[1]);
+        if (yMatch) y = parseFloat(yMatch[1]);
+        if (zMatch) z = parseFloat(zMatch[1]);
+        
+        // Проверка на движение
+        const hasCoordinates = (x !== null || y !== null || z !== null);
+        const isMoveCommand = (currentGCode === 'G0' || currentGCode === 'G1' || 
+                               (lastGCode === 'G0' || lastGCode === 'G1') && !currentGCode);
+        
+        if (hasCoordinates && isMoveCommand) {
+            const newX = (x !== null) ? x : currentX;
+            const newY = (y !== null) ? y : currentY;
+            const newZ = (z !== null) ? z : currentZ;
+            
+            // Добавляем начальную точку, если это первое движение
+            if (points.length === 0) {
+                points.push({x: currentX, y: currentY, z: currentZ, type: lastPointType});
+            }
+            
+            // Добавляем новую точку с типом движения
+            points.push({x: newX, y: newY, z: newZ, type: lastPointType});
+            
+            currentX = newX;
+            currentY = newY;
+            currentZ = newZ;
+        }
+        
+        // Обновляем lastGCode если была G команда
+        if (currentGCode) {
+            lastGCode = currentGCode;
+        }
+    }
+    
+    if (points.length < 2) return null;
+    
+   
+    // Конвертируем координаты для Three.js: X->X, Y->Z (глубина), Z->Y (высота)
+    const converted = points.map(p => ({
+        pos: new THREE.Vector3(p.x, p.z, p.y),
+        type: p.type
+    }));
+    
+    // Разделяем сегменты по типам
+    const g1Vertices = [];
+    const g0Vertices = [];
+    
+    // ВАЖНО: цвет сегмента определяется по типу КОНЕЧНОЙ точки или начальной?
+    // Правильнее - по типу движения, которое привело к этой точке
+    for (let i = 0; i < converted.length - 1; i++) {
+        const p1 = converted[i];
+        const p2 = converted[i+1];
+        
+        // Пропускаем нулевые перемещения
+        if (p1.pos.distanceTo(p2.pos) < 0.0001) continue;
+        
+        // Используем тип ВТОРОЙ точки (тип движения, которым пришли в эту точку)
+        // или тип первой точки - это зависит от логики G-code
+        // Обычно цвет определяется командой, которая выполняется для перехода из p1 в p2
+        const segmentType = p2.type; // Используем тип конечной точки
+        
+        // Добавляем две вершины для каждого сегмента
+        if (segmentType === 'G1') {
+            g1Vertices.push(p1.pos.x, p1.pos.y, p1.pos.z);
+            g1Vertices.push(p2.pos.x, p2.pos.y, p2.pos.z);
+        } else if (segmentType === 'G0') {
+            g0Vertices.push(p1.pos.x, p1.pos.y, p1.pos.z);
+            g0Vertices.push(p2.pos.x, p2.pos.y, p2.pos.z);
+        }
+    }
+    
+    const group = new THREE.Group();
+    
+    // Создаем линии G1 (голубой цвет) - увеличенная толщина
+    if (g1Vertices.length > 0) {
+        const g1Geometry = new THREE.BufferGeometry();
+        g1Geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(g1Vertices), 3));
+        const g1Material = new THREE.LineBasicMaterial({ color: 0xff5500, linewidth: 3 }); 
+        // 0x3399ff
+        const g1Lines = new THREE.LineSegments(g1Geometry, g1Material);
+        group.add(g1Lines);
+        console.log(`G1 сегментов: ${g1Vertices.length / 6}`);
+    }
+    
+    // Создаем линии G0 (зеленый цвет) - тоже увеличенная толщина
+    if (g0Vertices.length > 0) {
+        const g0Geometry = new THREE.BufferGeometry();
+        g0Geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(g0Vertices), 3));
+        const g0Material = new THREE.LineBasicMaterial({ color: 0x88aa88, linewidth: 3 });
+        const g0Lines = new THREE.LineSegments(g0Geometry, g0Material);
+        group.add(g0Lines);
+        console.log(`G0 сегментов: ${g0Vertices.length / 6}`);
+    }
+    
+    
+    
+    return group;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+        
+        // --- Функция обновления 3D по текущему G-коду (из хранилища на сервере) ---
+        async function fetchAndRender() {
+            const statusSpan = document.getElementById('statusMsg');
+            statusSpan.textContent = 'Загрузка...';
+            try {
+                const response = await fetch('/get_gcode');
+                const data = await response.json();
+                const gcode = data.gcode || '';
+                if (!gcode.trim()) {
+                    alert('Нет загруженного G-кода. Загрузите файл или используйте пример.');
+                    statusSpan.textContent = 'Ошибка: пустой код';
+                    return;
+                }
+                // Обновить окно кода
+                document.getElementById('gcodeViewer').innerText = gcode.length > 8000 ? gcode.slice(0, 8000) + '\n... (обрезано для отображения)' : gcode;
+                
+                // Построить линии
+                clearTrajectory();
+                const linesGroup = parseAndCreateLines(gcode);
+                if (linesGroup) {
+                    currentLinesGroup = linesGroup;
+                    scene.add(currentLinesGroup);
+                    statusSpan.textContent = `Визуализация: ${currentLinesGroup.children.length} отрезков`;
+                } else {
+                    statusSpan.textContent = 'Недостаточно точек (G0/G1) для построения';
+                }
+                // Применить wireframe режим? Не применим к линиям, только к потенциальным сеткам - пропускаем
+            } catch (err) {
+                console.error(err);
+                statusSpan.textContent = 'Ошибка при загрузке';
+                alert('Ошибка соединения с сервером');
+            }
+        }
+        
+        // --- Загрузка файла на сервер ---
+        async function uploadGcodeToServer(content, filename = 'upload.gcode') {
+            const statusSpan = document.getElementById('statusMsg');
+            statusSpan.textContent = 'Отправка...';
+            try {
+                const response = await fetch('/upload_gcode', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ gcode: content })
+                });
+                const result = await response.json();
+                if (result.status === 'ok') {
+                    statusSpan.textContent = 'G-code сохранён';
+                    // обновить окно кода
+                    document.getElementById('gcodeViewer').innerText = content.length > 8000 ? content.slice(0,8000)+'...' : content;
+                } else {
+                    statusSpan.textContent = 'Ошибка сохранения';
+                }
+            } catch(e) {
+                statusSpan.textContent = 'Ошибка сети';
+                console.error(e);
+            }
+        }
+        
+        // --- Обработка загрузки файла ---
+        document.getElementById('fileInput').addEventListener('change', (event) => {
+            const file = event.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = async (e) => {
+                const content = e.target.result;
+                await uploadGcodeToServer(content);
+                // автоматически перерисовать траекторию
+                await fetchAndRender();
+            };
+            reader.readAsText(file);
+            event.target.value = ''; // сброс
+        });
+        
+        // --- Загрузить пример G-code (куб размером 20) ---
+        document.getElementById('exampleBtn').addEventListener('click', async () => {
+            const exampleGcode = `G21 ; мм
+G90 ; абсолютные
+G0 X0 Y0 Z0
+G1 X20 Y0 Z0 F500
+G1 X20 Y20 Z0
+G1 X0 Y20 Z0
+G1 X0 Y0 Z0
+G0 Z5
+G1 X20 Y0 Z5
+G1 X20 Y20 Z5
+G1 X0 Y20 Z5
+G1 X0 Y0 Z5
+G0 Z0
+G1 X0 Y0 Z20
+G1 X20 Y0 Z20
+G1 X20 Y20 Z20
+G1 X0 Y20 Z20
+G1 X0 Y0 Z20
+G0 X0 Y0 Z0
+; диагональ для красоты
+G1 X20 Y20 Z20
+G1 X0 Y0 Z0
+G1 X20 Y0 Z20
+G1 X0 Y20 Z0`;
+            await uploadGcodeToServer(exampleGcode);
+            await fetchAndRender();
+        });
+        
+        // --- Кнопки управления ---
+        document.getElementById('renderBtn').addEventListener('click', fetchAndRender);
+        document.getElementById('clearBtn').addEventListener('click', () => {
+            clearTrajectory();
+            document.getElementById('statusMsg').textContent = 'Траектория очищена';
+        });
+        document.getElementById('centerViewBtn').addEventListener('click', () => {
+            // Центрируем камеру по текущим объектам (группа линий)
+            if (currentLinesGroup) {
+                const box = new THREE.Box3().setFromObject(currentLinesGroup);
+                const center = box.getCenter(new THREE.Vector3());
+                controls.target.copy(center);
+                // корректировка камеры - сохраним позицию, но направим на центр
+                camera.position.sub(controls.target).normalize().multiplyScalar(90);
+                camera.position.add(controls.target);
+                controls.update();
+            } else {
+                controls.target.set(0,0,0);
+                controls.update();
+            }
+        });
+        
+        // Стартовая проверка (загрузим, возможно уже есть gcode)
+        window.addEventListener('load', () => {
+            fetchAndRender(); // попытка отобразить, если что-то было загружено ранее
+        });
+        
+        // --- WireframeMode (для будущих объектов, не для линий, но оставим как пример, можно добавить подсветку точек) ---
+        // просто добавим эффект изменения материала - в данном случае никак не влияет на линии
+        wireframeCheck.addEventListener('change', (e) => {
+            // можно изменить цвет линий? не обязательно. Добавим небольшой эффект постобработки? не требуется.
+            console.log('Wireframe mode:', e.target.checked);
+        });
+        
+        // Анимация
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update(); // обновление при необходимости
+            renderer.render(scene, camera);
+            labelRenderer.render(scene, camera);
+        }
+        animate();
+        
+        // Обработка ресайза
+        window.addEventListener('resize', onWindowResize, false);
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            labelRenderer.setSize(window.innerWidth, window.innerHeight);
+        }
+        
+        // Небольшая звездная атмосфера (доп. точки)
+        const starGeometry = new THREE.BufferGeometry();
+        const starCount = 800;
+        const starPos = [];
+        for (let i = 0; i < starCount; i++) {
+            starPos.push((Math.random() - 0.5) * 400);
+            starPos.push((Math.random() - 0.5) * 200);
+            starPos.push((Math.random() - 0.5) * 150 - 50);
+        }
+        starGeometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(starPos), 3));
+        const starMat = new THREE.PointsMaterial({ color: 0xffffff, size: 0.25 });
+        const stars = new THREE.Points(starGeometry, starMat);
+        scene.add(stars);
+        
+    </script>
+</body>
+</html>

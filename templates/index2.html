@@ -1,255 +1,1041 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ru">
 <head>
-    <meta charset="UTF-8">
-    <title>CNC Control Panel</title>
-    <style>
-        body { margin: 0; overflow: hidden; background-color: #1a1a1a; font-family: sans-serif; }
-        
-       
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>G-code Sender + 3D Preview</title>
+  <style>
+    :root{
+      --bg:#0b1220;
+      --panel:#121b2f;
+      --text:#e9eefc;
+      --muted:#a9b4d0;
+      --accent:#6ea8fe;
+      --danger:#ff5c7a;
+      --ok:#2dd4bf;
+      --border:rgba(255,255,255,.12);
+      --shadow: 0 10px 30px rgba(0,0,0,.35);
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      --sans: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Noto Sans", "Liberation Sans", sans-serif;
+    }
 
-        .btn {
-            background: #444;
-            color: white;
-            border: 1px solid #666;
-            padding: 8px 15px;
-            margin-right: 10px;
-            cursor: pointer;
-            transition: 0.2s;
-        }
+    *{ box-sizing:border-box; }
+    body{
+      margin:0;
+      font-family:var(--sans);
+      background: radial-gradient(1200px 600px at 15% 10%, rgba(110,168,254,.18), transparent 55%),
+                  radial-gradient(900px 450px at 80% 20%, rgba(45,212,191,.12), transparent 55%),
+                  var(--bg);
+      color:var(--text);
+      padding: 18px;
+    }
 
-        .btn:hover { background: #666; }
-        .btn-blue { background: #007bff; border-color: #0056b3; }
-        
-        #file-input { display: none; }
-    </style>
+    .wrap{
+      max-width: 1500px;
+      margin: 0 auto;
+      display: grid;
+      gap: 14px;
+    }
+
+    header{
+      display:flex;
+      gap:12px;
+      align-items:flex-start;
+      justify-content:space-between;
+      flex-wrap:wrap;
+    }
+
+    .title h1{
+      margin:0;
+      font-size: 20px;
+      letter-spacing:.2px;
+    }
+    .title p{
+      margin:6px 0 0 0;
+      color:var(--muted);
+      font-size: 13px;
+      max-width: 62ch;
+      line-height: 1.35;
+    }
+
+    .card{
+      background: linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.02));
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      box-shadow: var(--shadow);
+      overflow:hidden;
+    }
+
+    .grid{
+      display:grid;
+      grid-template-columns: 1.05fr 1fr 2fr;
+      gap: 14px;
+    }
+
+    @media (max-width: 1050px){
+      .grid{ grid-template-columns: 1fr; }
+    }
+
+    .section{
+      padding: 14px;
+    }
+
+    label{
+      color:var(--muted);
+      font-size: 12px;
+      display:block;
+      margin-bottom:6px;
+    }
+
+    input[type="text"], select, input[type="number"], textarea{
+      width:100%;
+      border:1px solid var(--border);
+      background: rgba(0,0,0,.15);
+      color:var(--text);
+      border-radius: 10px;
+      padding: 10px 12px;
+      outline:none;
+      font-size: 14px;
+    }
+
+    textarea{
+      min-height: 320px;
+      font-family: var(--mono);
+      white-space: pre;
+      resize: vertical;
+    }
+
+    .controls{
+      display:grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+    @media (max-width: 520px){
+      .controls{ grid-template-columns: 1fr; }
+    }
+
+    button{
+      border:0;
+      border-radius: 12px;
+      padding: 11px 12px;
+      font-weight: 650;
+      letter-spacing:.2px;
+      cursor:pointer;
+      transition: transform .04s ease, filter .15s ease, background .15s ease;
+      background: rgba(110,168,254,.18);
+      color: var(--text);
+      border: 1px solid rgba(110,168,254,.35);
+      width: 100%;
+    }
+    button:hover{ filter: brightness(1.05); }
+    button:active{ transform: translateY(1px); }
+
+    .btn-primary{
+      background: linear-gradient(180deg, rgba(110,168,254,.35), rgba(110,168,254,.18));
+      border-color: rgba(110,168,254,.55);
+    }
+    .btn-danger{
+      background: linear-gradient(180deg, rgba(255,92,122,.28), rgba(255,92,122,.14));
+      border-color: rgba(255,92,122,.55);
+    }
+    .btn-ok{
+      background: linear-gradient(180deg, rgba(45,212,191,.28), rgba(45,212,191,.14));
+      border-color: rgba(45,212,191,.55);
+    }
+
+    .row{
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+      align-items:center;
+    }
+
+    .status{
+      display:flex;
+      flex-direction:column;
+      gap:10px;
+    }
+
+    .pill{
+      display:flex;
+      gap:10px;
+      align-items:center;
+      padding:10px 12px;
+      border-radius: 12px;
+      border:1px solid var(--border);
+      background: rgba(0,0,0,.12);
+    }
+
+    .dot{
+      width:10px;
+      height:10px;
+      border-radius:999px;
+      background: var(--muted);
+      box-shadow: 0 0 0 3px rgba(255,255,255,.04);
+      flex: 0 0 auto;
+    }
+    .dot.ok{ background: var(--ok); }
+    .dot.bad{ background: var(--danger); }
+
+    .pill .meta{
+      display:flex;
+      flex-direction:column;
+      gap:2px;
+      min-width: 200px;
+    }
+    .pill .meta b{ font-size: 13px; }
+    .pill .meta span{ font-size: 12px; color: var(--muted); }
+
+    .log{
+      border: 1px solid var(--border);
+      background: rgba(0,0,0,.18);
+      border-radius: 12px;
+      padding: 10px;
+      font-family: var(--mono);
+      font-size: 12px;
+      max-height: 280px;
+      overflow:auto;
+      white-space: pre-wrap;
+    }
+
+    .small{
+      font-size: 12px;
+      color: var(--muted);
+      line-height: 1.4;
+      margin-top: 10px;
+    }
+
+    .kbd{
+      font-family: var(--mono);
+      font-size: 12px;
+      border:1px solid var(--border);
+      padding:2px 6px;
+      border-radius: 8px;
+      background: rgba(255,255,255,.03);
+      color: var(--text);
+    }
+
+    .previewHeader{
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:10px;
+      margin-bottom: 10px;
+    }
+
+    .segControls{
+      display:grid;
+      grid-template-columns: 1fr;
+      gap:8px;
+      width: 100%;
+    }
+
+    .segControls .tog{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      padding: 10px 12px;
+      border-radius: 12px;
+      border:1px solid var(--border);
+      background: rgba(0,0,0,.12);
+    }
+
+    .segControls input[type="checkbox"]{
+      width: 18px; height: 18px;
+      accent-color: var(--accent);
+    }
+
+    .previewFooter{
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .mono{ font-family: var(--mono); }
+
+    .btn2{
+      display:grid;
+      grid-template-columns: 1fr 1fr;
+      gap:10px;
+      width: 100%;
+    }
+    @media (max-width: 520px){
+      .btn2{ grid-template-columns: 1fr; }
+    }
+
+    #canvas3dContainer {
+      position: relative;
+    }
+
+    .loading-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0,0,0,0.7);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 12px;
+      z-index: 10;
+      backdrop-filter: blur(4px);
+    }
+
+    .loading-spinner {
+      color: white;
+      background: rgba(0,0,0,0.8);
+      padding: 12px 24px;
+      border-radius: 30px;
+      font-size: 14px;
+      display: flex;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .spinner {
+      width: 20px;
+      height: 20px;
+      border: 2px solid rgba(255,255,255,0.3);
+      border-top-color: var(--ok);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+  </style>
 </head>
 <body>
-
-    <style>
-    /* Контейнер верхнего меню */
-    #menu-bar {
-        position: absolute;
-        top: 0; left: 0; right: 0;
-        background: #f0f0f0; /* Классический серый цвет десктопа */
-        display: flex;
-        font-size: 14px;
-        border-bottom: 1px solid #ccc;
-        z-index: 1000;
-        user-select: none;
-    }
-
-    /* Главные пункты меню */
-    .menu-item {
-        position: relative;
-        padding: 5px 15px;
-        cursor: default;
-    }
-
-    .menu-item:hover {
-        background: #0078d7; /* Синий цвет выделения */
-        color: white;
-    }
-
-    /* Выпадающий список */
-    .dropdown {
-        display: none;
-        position: absolute;
-        top: 100%;
-        left: 0;
-        background: white;
-        color: black;
-        box-shadow: 2px 2px 5px rgba(0,0,0,0.2);
-        min-width: 180px;
-        border: 1px solid #ccc;
-    }
-
-    .menu-item:hover .dropdown {
-        display: block;
-    }
-
-    /* Пункты внутри выпадающего списка */
-    .dropdown-item {
-        padding: 8px 12px;
-        cursor: pointer;
-    }
-
-    .dropdown-item:hover {
-        background: #e5e5e5;
-        color: black;
-    }
-
-    /* Разделитель */
-    .divider {
-        height: 1px;
-        background: #ccc;
-        margin: 4px 0;
-    }
-
-    /* Скрытый инпут для файлов */
-    #file-input { display: none; }
-</style>
-
-<div id="menu-bar">
-    <div class="menu-item">
-        Файл
-        <div class="dropdown">
-            <div class="dropdown-item" onclick="document.getElementById('file-input').click()">Открыть G-код...</div>
-            <div class="divider"></div>
-            <div class="dropdown-item" onclick="location.reload()">Очистить сцену</div>
-            <div class="dropdown-item" onclick="window.close()">Выход</div>
-        </div>
+<div class="wrap">
+  <header>
+    <div class="title">
+      <h1>GCodeAir</h1>
+      <p>
+        Вставьте G-code, нажмите <b>Подключить</b> и <b>Отправить</b>.
+        Справа будет 3D-превью траектории по <span class="kbd">G0/G1</span> в плоскости <span class="kbd">X/Y</span>.
+      </p>
     </div>
-    
-    <div class="menu-item">
-        Управление
-        <div class="dropdown">
-            <div class="dropdown-item" onclick="callPython('home')">В начало (Home)</div>
-            <div class="dropdown-item" onclick="callPython('probe')">Калибровка (Z-Probe)</div>
-            <div class="divider"></div>
-            <div class="dropdown-item" onclick="callPython('stop')" style="color: red;">Экстренный стоп</div>
-        </div>
+    <div class="row">
+      <span class="kbd">Chrome/Edge</span>
+      <span class="kbd">WebSocket</span>
+      <span class="kbd">3D Preview</span>
     </div>
+  </header>
 
-    <div class="menu-item">
-        Вид
-        <div class="dropdown">
-            <div class="dropdown-item" onclick="resetCamera()">Сбросить камеру</div>
-            <div class="dropdown-item" onclick="toggleGrid()">Скрыть/Показать сетку</div>
-        </div>
-    </div>
+  <div class="grid">
+    <!-- LEFT: GCODE -->
+    <section class="card">
+      <div class="section">
+        <label for="gcode">G-code</label>
+        <textarea id="gcode" spellcheck="false" placeholder="Вставьте сюда ваш G-code..."></textarea>
 
-    <div class="menu-item">
-        Справка
-        <div class="dropdown">
-            <div class="dropdown-item" onclick="alert('CNC Viewer v1.0\nFlask + Three.js')">О программе</div>
+        <div class="small">
+          Превью строится по строкам с <span class="kbd">X</span>/<span class="kbd">Y</span> и командами <span class="kbd">G0</span>, <span class="kbd">G1</span>.
+          Комментарии <span class="kbd">;</span> и <span class="kbd">( ... )</span> пропускаются.
         </div>
-    </div>
+
+        <div class="btn2" style="margin-top: 12px;">
+          <button class="btn-ok" id="btnPreview">Обновить превью</button>
+          <button class="btn-primary" id="btnUseDemo">Загрузить демо</button>
+          <button id="btnLoadFile">Открыть файл</button>
+          <input id="fileInput" type="file" style="display:none" accept=".gcode,.txt,.nc" />
+        </div>
+      </div>
+    </section>
+
+    <!-- MIDDLE: CONTROLS + STATUS -->
+    <aside class="card">
+      <div class="section status">
+        <div class="pill">
+          <div id="dotConn" class="dot"></div>
+          <div class="meta">
+            <b id="connTitle">Не подключено</b>
+            <span id="connSub">Ожидание устройства...</span>
+          </div>
+        </div>
+
+        <div class="controls">
+          <div>
+            <label for="IP">IP</label>
+            <input id="IP" type="text" value="192.168.1.58" />
+          </div>
+          <div>
+            <label for="Port">Port</label>
+            <input id="Port" type="number" value="8888" min="0" step="1" />
+          </div>
+        </div>
+
+        <div class="controls">
+          <button class="btn-primary" id="btnConnect">Подключить</button>
+          <button class="btn-danger" id="btnDisconnect" disabled>Отключить</button>
+        </div>
+
+        <div class="controls">
+          <button class="btn-ok" id="btnSend" disabled>Отправить</button>
+          <button class="btn-danger" id="btnStop" disabled>Стоп</button>
+        </div>
+
+        <label for="log">Лог</label>
+        <div class="log" id="log"></div>
+
+        <div class="small">
+          Превью — это симуляция. 3D визуализация траектории. <span style="color: #ff5500;">Оранжевый</span> = <span class="kbd">G1</span>, 
+          <span style="color: #6699cc;">Голубой</span> = <span class="kbd">G0</span>. Управление: мышь/тачпад.
+        </div>
+      </div>
+    </aside>
+
+    <!-- RIGHT: 3D PREVIEW -->
+    <section class="card">
+      <div class="section">
+        <div class="previewHeader">
+          <div>
+            <div style="font-weight:800; letter-spacing:.2px; margin-bottom:6px;">3D просмотр движения</div>
+          </div>
+        </div>
+
+        <div class="segControls">
+          <div class="row">
+            <div class="tog">
+              <span>Показать оси</span>
+              <label style="margin:0;">
+                <input id="chkAxes" type="checkbox" checked />
+              </label>
+            </div>
+            <div class="tog">
+              <span>Показать сетку</span>
+              <label style="margin:0;">
+                <input id="chkGrid3d" type="checkbox" checked />
+              </label>
+            </div>
+            <div class="tog">
+              <span>Показать опорные точки</span>
+              <label style="margin:0;">
+                <input id="chkPoints" type="checkbox" />
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <div style="height:10px"></div>
+
+        <div id="canvas3dContainer" style="width:100%; height:500px; background: #0a0a1a; border-radius: 12px; overflow: hidden; position: relative;">
+          <!-- Loading индикатор будет добавлен динамически -->
+        </div>
+
+        <div class="previewFooter">
+          <div><span class="mono">Размеры (X/Y/Z)</span>: <span id="bbInfo">—</span></div>
+          <div><span class="mono">G1 сегментов</span>: <span id="g1SegInfo">0</span></div>
+          <div><span class="mono">G0 сегментов</span>: <span id="g0SegInfo">0</span></div>
+          <div><span class="mono">Всего точек</span>: <span id="pointsInfo">0</span></div>
+        </div>
+      </div>
+    </section>
+  </div>
 </div>
 
-<input type="file" id="file-input" accept=".gcode">
+<script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.128.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.128.0/examples/jsm/"
+    }
+  }
+</script>
 
-    <script type="importmap">
-        {
-            "imports": {
-                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
-            }
-        }
-    </script>
+<script type="module">
+  import * as THREE from 'three';
+  import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
-    <script type="module">
-        import * as THREE from 'three';
-        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+  // --- Инициализация 3D сцены ---
+  const container = document.getElementById('canvas3dContainer');
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x0a0a1a);
+  scene.fog = new THREE.FogExp2(0x0a0a1a, 0.002);
 
-        // Инициализация Three.js (базовый код из предыдущего ответа)
-        const scene = new THREE.Scene();
-        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-        const renderer = new THREE.WebGLRenderer({ antialias: true });
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        document.body.appendChild(renderer.domElement);
+  const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 2000);
+  camera.position.set(80, 60, 100);
+  camera.lookAt(0, 0, 0);
 
-        const controls = new OrbitControls(camera, renderer.domElement);
-        camera.position.set(50, 50, 50);
-        
-        const grid = new THREE.GridHelper(100, 20, 0x444444, 0x222222);
-        grid.rotation.x = Math.PI / 2;
-        scene.add(grid);
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(container.clientWidth, container.clientHeight);
+  renderer.setPixelRatio(window.devicePixelRatio);
+  container.innerHTML = '';
+  container.appendChild(renderer.domElement);
 
-        // Объект для хранения линии траектории
-        let currentPath;
+  // Функция показа/скрытия загрузчика
+  function showLoading(show) {
+    let loadingDiv = document.getElementById('loadingOverlay');
+    if (show) {
+      if (!loadingDiv) {
+        loadingDiv = document.createElement('div');
+        loadingDiv.id = 'loadingOverlay';
+        loadingDiv.className = 'loading-overlay';
+        loadingDiv.innerHTML = `
+          <div class="loading-spinner">
+            <div class="spinner"></div>
+            <span>Загрузка 3D модели...</span>
+          </div>
+        `;
+        container.style.position = 'relative';
+        container.appendChild(loadingDiv);
+      }
+      loadingDiv.style.display = 'flex';
+    } else {
+      if (loadingDiv) {
+        loadingDiv.style.display = 'none';
+      }
+    }
+  }
 
-        // --- ФУНКЦИЯ ВЫЗОВА PYTHON ---
-        window.callPython = async (action) => {
-            try {
-                const response = await fetch('/api/command', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ action: action })
-                });
-                const data = await response.json();
-                alert("Ответ от Python: " + data.message);
-            } catch (e) {
-                console.error("Ошибка при связи с Flask", e);
-            }
-        };
+  const controls3d = new OrbitControls(camera, renderer.domElement);
+  controls3d.enableDamping = true;
+  controls3d.dampingFactor = 0.05;
+  controls3d.autoRotate = false;
+  controls3d.enableZoom = true;
+  controls3d.zoomSpeed = 1.2;
+  controls3d.target.set(0, 0, 0);
 
-        // --- ЛОГИКА ЧТЕНИЯ ФАЙЛА ---
-        document.getElementById('file-input').addEventListener('change', function(e) {
-            const file = e.target.files[0];
-            if (!file) return;
+  // Освещение
+  const ambientLight = new THREE.AmbientLight(0x404060);
+  scene.add(ambientLight);
+  const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+  directionalLight.position.set(1, 2, 1);
+  scene.add(directionalLight);
+  const fillLight = new THREE.PointLight(0x445566, 0.5);
+  fillLight.position.set(0, -5, 0);
+  scene.add(fillLight);
+  const backLight = new THREE.DirectionalLight(0x88aaff, 0.4);
+  backLight.position.set(-1, 1, -1);
+  scene.add(backLight);
 
-            const reader = new FileReader();
-            reader.onload = function(e) {
-                const text = e.target.result;
-                console.log("Файл прочитан, начинаем парсинг...");
-                drawPathFromGCode(text);
-            };
-            reader.readAsText(file);
+  // Вспомогательные объекты
+  let axesHelper = new THREE.AxesHelper(60);
+  let gridHelper = new THREE.GridHelper(200, 40, 0x88aaff, 0x335588);
+  gridHelper.position.y = -0.1;
+  scene.add(axesHelper);
+  scene.add(gridHelper);
+
+  const chkAxes = document.getElementById('chkAxes');
+  const chkGrid3d = document.getElementById('chkGrid3d');
+  const chkPoints = document.getElementById('chkPoints');
+  
+  chkAxes.addEventListener('change', (e) => { axesHelper.visible = e.target.checked; });
+  chkGrid3d.addEventListener('change', (e) => { gridHelper.visible = e.target.checked; });
+  
+  let currentLinesGroup = null;
+  let currentPointsGroup = null;
+
+  function clearTrajectory() {
+    if (currentLinesGroup) {
+      scene.remove(currentLinesGroup);
+      if (currentLinesGroup.children) {
+        currentLinesGroup.children.forEach(child => {
+          if (child.isLineSegments) {
+            child.geometry.dispose();
+            child.material.dispose();
+          }
         });
+      }
+      currentLinesGroup = null;
+    }
+    if (currentPointsGroup) {
+      scene.remove(currentPointsGroup);
+      if (currentPointsGroup.children) {
+        currentPointsGroup.children.forEach(child => {
+          if (child.isPoints) {
+            child.geometry.dispose();
+            child.material.dispose();
+          }
+        });
+      }
+      currentPointsGroup = null;
+    }
+  }
 
-        function drawPathFromGCode(content) {
-            // Удаляем старую траекторию, если есть
-            if (currentPath) scene.remove(currentPath);
-
-            const points = [];
-            const lines = content.split('\n');
-
-            // Простейший парсер G-кода (только G0/G1 X... Y... Z...)
-            lines.forEach(line => {
-                const xMatch = line.match(/X([-+]?[0-9]*\.?[0-9]+)/);
-                const yMatch = line.match(/Y([-+]?[0-9]*\.?[0-9]+)/);
-                const zMatch = line.match(/Z([-+]?[0-9]*\.?[0-9]+)/);
-
-                if (xMatch || yMatch || zMatch) {
-                    // Берем предыдущие значения, если текущие не указаны
-                    const prev = points.length > 0 ? points[points.length - 1] : {x:0, y:0, z:0};
-                    const x = xMatch ? parseFloat(xMatch[1]) : prev.x;
-                    const y = yMatch ? parseFloat(yMatch[1]) : prev.y;
-                    const z = zMatch ? parseFloat(zMatch[1]) : prev.z;
-                    points.push(new THREE.Vector3(x, y, z));
-                }
-            });
-
-            if (points.length > 0) {
-                const geometry = new THREE.BufferGeometry().setFromPoints(points);
-                const material = new THREE.LineBasicMaterial({ color: 0x00ffff });
-                currentPath = new THREE.Line(geometry, material);
-                scene.add(currentPath);
-            }
+  function parseAndCreateLines(gcodeText) {
+    const lines = gcodeText.split(/\r?\n/);
+    const points = [];
+    let currentX = 0, currentY = 0, currentZ = 0;
+    let lastGCode = null;
+    let lastPointType = 'G1';
+    
+    for (let raw of lines) {
+      raw = raw.trim();
+      if (raw === "") continue;
+      
+      const codeWithoutComment = raw.split(';')[0].toUpperCase().trim();
+      if (codeWithoutComment === "") continue;
+      
+      let gMatch = codeWithoutComment.match(/G(?:0|1|2|3)?\d*/i);
+      let currentGCode = null;
+      
+      if (gMatch) {
+        currentGCode = gMatch[0].toUpperCase();
+        lastGCode = currentGCode;
+        if (currentGCode === 'G0' || currentGCode === 'G1') {
+          lastPointType = currentGCode;
         }
-
-        function animate() {
-            requestAnimationFrame(animate);
-            renderer.render(scene, camera);
+      }
+      
+      let x = null, y = null, z = null;
+      const xMatch = codeWithoutComment.match(/X([+-]?\d*\.?\d+)/i);
+      const yMatch = codeWithoutComment.match(/Y([+-]?\d*\.?\d+)/i);
+      const zMatch = codeWithoutComment.match(/Z([+-]?\d*\.?\d+)/i);
+      
+      if (xMatch) x = parseFloat(xMatch[1]);
+      if (yMatch) y = parseFloat(yMatch[1]);
+      if (zMatch) z = parseFloat(zMatch[1]);
+      
+      const hasCoordinates = (x !== null || y !== null || z !== null);
+      const isMoveCommand = (currentGCode === 'G0' || currentGCode === 'G1' || 
+                             (lastGCode === 'G0' || lastGCode === 'G1') && !currentGCode);
+      
+      if (hasCoordinates && isMoveCommand) {
+        const newX = (x !== null) ? x : currentX;
+        const newY = (y !== null) ? y : currentY;
+        const newZ = (z !== null) ? z : currentZ;
+        
+        if (points.length === 0) {
+          points.push({x: currentX, y: currentY, z: currentZ, type: lastPointType});
         }
-        animate();
-
-        // Функция сброса камеры (Вид -> Сбросить камеру)
-window.resetCamera = () => {
-    camera.position.set(50, 50, 50);
-    controls.target.set(0, 0, 0);
-    controls.update();
-};
-
-// Показать/скрыть сетку
-let gridVisible = true;
-window.toggleGrid = () => {
-    gridVisible = !gridVisible;
-    grid.visible = gridVisible;
-};
-
-// Вызов Python (уже был у нас ранее)
-window.callPython = async (action) => {
-    console.log(`Отправка команды: ${action}`);
-    const response = await fetch('/api/command', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ action: action })
+        
+        points.push({x: newX, y: newY, z: newZ, type: lastPointType});
+        
+        currentX = newX;
+        currentY = newY;
+        currentZ = newZ;
+      }
+      
+      if (currentGCode) {
+        lastGCode = currentGCode;
+      }
+    }
+    
+    if (points.length < 2) return null;
+    
+    const converted = points.map(p => ({
+      pos: new THREE.Vector3(p.x, p.z, p.y),
+      type: p.type
+    }));
+    
+    const g1Vertices = [];
+    const g0Vertices = [];
+    
+    for (let i = 0; i < converted.length - 1; i++) {
+      const p1 = converted[i];
+      const p2 = converted[i+1];
+      
+      if (p1.pos.distanceTo(p2.pos) < 0.0001) continue;
+      
+      const segmentType = p2.type;
+      
+      if (segmentType === 'G1') {
+        g1Vertices.push(p1.pos.x, p1.pos.y, p1.pos.z);
+        g1Vertices.push(p2.pos.x, p2.pos.y, p2.pos.z);
+      } else if (segmentType === 'G0') {
+        g0Vertices.push(p1.pos.x, p1.pos.y, p1.pos.z);
+        g0Vertices.push(p2.pos.x, p2.pos.y, p2.pos.z);
+      }
+    }
+    
+    const group = new THREE.Group();
+    
+    if (g1Vertices.length > 0) {
+      const g1Geometry = new THREE.BufferGeometry();
+      g1Geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(g1Vertices), 3));
+      const g1Material = new THREE.LineBasicMaterial({ color: 0xff5500, linewidth: 2 });
+      const g1Lines = new THREE.LineSegments(g1Geometry, g1Material);
+      group.add(g1Lines);
+      document.getElementById('g1SegInfo').textContent = (g1Vertices.length / 6).toFixed(0);
+    } else {
+      document.getElementById('g1SegInfo').textContent = "0";
+    }
+    
+    if (g0Vertices.length > 0) {
+      const g0Geometry = new THREE.BufferGeometry();
+      g0Geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(g0Vertices), 3));
+      const g0Material = new THREE.LineBasicMaterial({ color: 0x88aacc, linewidth: 1, transparent: true, opacity: 0.5 });
+      const g0Lines = new THREE.LineSegments(g0Geometry, g0Material);
+      group.add(g0Lines);
+      document.getElementById('g0SegInfo').textContent = (g0Vertices.length / 6).toFixed(0);
+    } else {
+      document.getElementById('g0SegInfo').textContent = "0";
+    }
+    
+    document.getElementById('pointsInfo').textContent = points.length;
+    
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, minZ = Infinity, maxZ = -Infinity;
+    points.forEach(p => {
+      minX = Math.min(minX, p.x);
+      maxX = Math.max(maxX, p.x);
+      minY = Math.min(minY, p.y);
+      maxY = Math.max(maxY, p.y);
+      minZ = Math.min(minZ, p.z);
+      maxZ = Math.max(maxZ, p.z);
     });
-    const data = await response.json();
-    console.log("Ответ сервера:", data.message);
-};
-    </script>
+    
+    const sizeX = (maxX - minX).toFixed(1);
+    const sizeY = (maxY - minY).toFixed(1);
+    const sizeZ = (maxZ - minZ).toFixed(1);
+    document.getElementById('bbInfo').textContent = `${sizeX} / ${sizeY} / ${sizeZ}`;
+    
+    const pointsForDisplay = converted;
+    const pointsGroup = new THREE.Group();
+    const sphereGeometry = new THREE.SphereGeometry(0.4, 6, 6);
+    const sphereMaterial = new THREE.MeshStandardMaterial({ color: 0xffaa55, emissive: 0x442200 });
+    
+    const step = Math.max(1, Math.floor(pointsForDisplay.length / 500));
+    for (let i = 0; i < pointsForDisplay.length; i += step) {
+      const sphere = new THREE.Mesh(sphereGeometry, sphereMaterial);
+      sphere.position.copy(pointsForDisplay[i].pos);
+      pointsGroup.add(sphere);
+    }
+    
+    return { linesGroup: group, pointsGroup: pointsGroup };
+  }
+  
+  window.updateGCodeVisualization = function(gcodeText) {
+    showLoading(true);
+    
+    setTimeout(() => {
+      try {
+        clearTrajectory();
+        const result = parseAndCreateLines(gcodeText);
+        if (result) {
+          currentLinesGroup = result.linesGroup;
+          currentPointsGroup = result.pointsGroup;
+          scene.add(currentLinesGroup);
+          
+          if (chkPoints.checked) {
+            scene.add(currentPointsGroup);
+          }
+          
+          if (currentLinesGroup) {
+            const box = new THREE.Box3().setFromObject(currentLinesGroup);
+            const center = box.getCenter(new THREE.Vector3());
+            controls3d.target.copy(center);
+            
+            const size = box.getSize(new THREE.Vector3());
+            const maxDim = Math.max(size.x, size.y, size.z);
+            const distance = maxDim * 1.5;
+            camera.position.set(distance * 0.8, distance * 0.6, distance);
+            controls3d.update();
+          }
+        }
+      } catch(e) {
+        console.error('Ошибка визуализации:', e);
+      } finally {
+        showLoading(false);
+      }
+    }, 50);
+  };
+  
+  chkPoints.addEventListener('change', (e) => {
+    if (currentPointsGroup) {
+      if (e.target.checked) {
+        scene.add(currentPointsGroup);
+      } else {
+        scene.remove(currentPointsGroup);
+      }
+    }
+  });
+  
+  // Анимация
+  function animate() {
+    requestAnimationFrame(animate);
+    controls3d.update();
+    renderer.render(scene, camera);
+  }
+  animate();
+  
+  window.addEventListener('resize', () => {
+    const width = container.clientWidth;
+    const height = container.clientHeight;
+    camera.aspect = width / height;
+    camera.updateProjectionMatrix();
+    renderer.setSize(width, height);
+  });
+  
+  // Звёздный фон
+  const starGeometry = new THREE.BufferGeometry();
+  const starCount = 1000;
+  const starPositions = [];
+  for (let i = 0; i < starCount; i++) {
+    starPositions.push((Math.random() - 0.5) * 500);
+    starPositions.push((Math.random() - 0.5) * 300);
+    starPositions.push((Math.random() - 0.5) * 200 - 100);
+  }
+  starGeometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(starPositions), 3));
+  const starMaterial = new THREE.PointsMaterial({ color: 0xffffff, size: 0.2 });
+  const stars = new THREE.Points(starGeometry, starMaterial);
+  scene.add(stars);
+  
+  console.log('3D визуализация готова');
+</script>
+
+<script>
+  // DOM элементы
+  const $ = (id) => document.getElementById(id);
+
+  const dotConn = $("dotConn");
+  const connTitle = $("connTitle");
+  const connSub = $("connSub");
+  const logEl = $("log");
+
+  const gcodeEl = $("gcode");
+  const IPEl = $("IP");
+  const PortEl = $("Port");
+
+  const btnConnect = $("btnConnect");
+  const btnDisconnect = $("btnDisconnect");
+  const btnSend = $("btnSend");
+  const btnStop = $("btnStop");
+  const btnPreview = $("btnPreview");
+  const btnUseDemo = $("btnUseDemo");
+  const btnLoadFile = $("btnLoadFile");
+  const fileInput = $("fileInput");
+
+  let stopRequested = false;
+
+  function log(msg) {
+    const ts = new Date().toLocaleTimeString();
+    logEl.textContent += `[${ts}] ${msg}\n`;
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  function setConnected(connected, sub = "") {
+    if (connected) {
+      dotConn.classList.add("ok");
+      dotConn.classList.remove("bad");
+      connTitle.textContent = "Подключено";
+      connSub.textContent = sub || "Соединение установлено";
+      btnDisconnect.disabled = false;
+      btnSend.disabled = false;
+      btnStop.disabled = false;
+    } else {
+      dotConn.classList.remove("ok");
+      dotConn.classList.add("bad");
+      connTitle.textContent = "Не подключено";
+      connSub.textContent = sub || "Ожидание устройства...";
+      btnDisconnect.disabled = true;
+      btnSend.disabled = true;
+      btnStop.disabled = true;
+    }
+  }
+
+  function normalizeGcode(text) {
+    return text.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n");
+  }
+
+  function extractLines(gcodeText) {
+    const lines = normalizeGcode(gcodeText).split("\n");
+    const cleaned = [];
+    for (let line of lines) {
+      line = line.replace(/;.*$/g, "");
+      line = line.replace(/\([^)]*\)/g, "");
+      const t = line.trim();
+      if (!t) continue;
+      cleaned.push(t);
+    }
+    return cleaned;
+  }
+
+  // Подключение к ESP через сервер
+  async function connectToESP() {
+    log(`Подключение к ${IPEl.value}:${PortEl.value}...`);
+    try {
+      const response = await fetch('/connect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ip: IPEl.value, port: PortEl.value })
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        log(`Ошибка: ${response.status} - ${errorData.message || 'Неизвестная ошибка'}`);
+        setConnected(false);
+        return;
+      }
+      
+      const data = await response.json();
+      if (data.status === "connect") {
+        setConnected(true, `${IPEl.value}:${PortEl.value}`);
+        log("Подключено успешно");
+      } else {
+        setConnected(false);
+        log("Ошибка подключения");
+      }
+    } catch (error) {
+      log(`Ошибка подключения: ${error.message}`);
+      setConnected(false);
+    }
+  }
+
+  async function disconnectESP() {
+    try {
+      const response = await fetch('/disconnect');
+      const data = await response.json();
+      log(data.status || "Отключено");
+      setConnected(false);
+    } catch (error) {
+      log(`Ошибка отключения: ${error.message}`);
+      setConnected(false);
+    }
+  }
+
+  // Отправка G-code
+  btnSend.addEventListener('click', async () => {
+    stopRequested = false;
+    const gcodeText = gcodeEl.value;
+    const lines = extractLines(gcodeText);
+    
+    if (lines.length === 0) {
+      log("Нет G-code для отправки");
+      return;
+    }
+    
+    log(`Начало отправки (${lines.length} строк)`);
+    
+    for (let i = 0; i < lines.length; i++) {
+      if (stopRequested) {
+        log("⏹️ Отправка прервана");
+        break;
+      }
+      
+      const line = lines[i];
+      try {
+        const response = await fetch('/send', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ gcode: line })
+        });
+        
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+        
+        const data = await response.json();
+        log(`✅ ${line} → ${data.status || 'OK'}`);
+      } catch (error) {
+        log(`❌ Ошибка на строке "${line}": ${error.message}`);
+        break;
+      }
+    }
+    
+    log("✅ Отправка завершена");
+  });
+
+  // Стоп
+  btnStop.addEventListener("click", () => {
+    stopRequested = true;
+    log("⏹️ Команда остановки отправлена");
+  });
+
+  btnConnect.addEventListener("click", connectToESP);
+  btnDisconnect.addEventListener("click", disconnectESP);
+
+  // Превью
+  btnPreview.addEventListener("click", () => {
+    const gcode = gcodeEl.value;
+    if (gcode.trim()) {
+      window.updateGCodeVisualization(gcode);
+      log("3D превью обновлено");
+    } else {
+      log("Нет G-code для отображения");
+    }
+  });
+
+  // Демо G-code
+  btnUseDemo.addEventListener("click", () => {
+    const demoGcode = `; Демо G-code
+G21
+G90
+G0 X0 Y0
+G1 X50 Y0 Z0 F1500
+G1 X50 Y50 Z0
+G1 X0 Y50 Z0
+G1 X0 Y0 Z0G0 X10 Y10
+G1 X40 Y10
+G1 X40 Y40
+G1 X10 Y40
+G1 X10 Y10
+G0 X25 Y25
+G1 X30 Y30
+G1 X35 Y25
+G1 X30 Y20
+G1 X25 Y25
+M30`;
+    gcodeEl.value = demoGcode;
+    window.updateGCodeVisualization(demoGcode);
+    log("Демо G-code загружен");
+  });
+
+  // Загрузка из файла
+  btnLoadFile.addEventListener("click", () => {
+    fileInput.click();
+  });
+
+  fileInput.addEventListener("change", () => {
+    const file = fileInput.files[0];
+    if (!file) return;
+    
+    log(`Чтение файла: ${file.name}`);
+    const reader = new FileReader();
+    
+    reader.onload = (e) => {
+      const content = e.target.result;
+      gcodeEl.value = content;
+      window.updateGCodeVisualization(content);
+      log(`Файл "${file.name}" загружен (${content.length} символов)`);
+    };
+    
+    reader.onerror = () => {
+      log(`Ошибка чтения файла "${file.name}"`);
+    };
+    
+    reader.readAsText(file);
+  });
+
+  // Авто-обновление при вводе
+  let tmr = null;
+  gcodeEl.addEventListener("input", () => {
+    clearTimeout(tmr);
+    tmr = setTimeout(() => {
+      const gcode = gcodeEl.value;
+      if (gcode.trim()) {
+        window.updateGCodeVisualization(gcode);
+      }
+    }, 800);
+  });
+
+  // Инициализация
+  gcodeEl.value = `; Пример G-code
+G21
+G90
+G0 X0 Y0
+G1 X50 Y0 Z0 F1500
+G1 X50 Y50 Z0
+G1 X0 Y50 Z0
+G1 X0 Y0 Z0
+G0 X10 Y10
+G1 X40 Y10
+G1 X40 Y40
+G1 X10 Y40
+G1 X10 Y10
+M30`;
+  setConnected(false);
+  
+  // Запускаем начальную визуализацию
+  setTimeout(() => {
+    window.updateGCodeVisualization(gcodeEl.value);
+  }, 500);
+</script>
 </body>
 </html>

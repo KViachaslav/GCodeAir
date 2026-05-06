@@ -13,7 +13,7 @@ def get_socket():
     return s
 @app.get("/")
 def index():
-    return render_template("index1.html")
+    return render_template("index.html")
 @app.route('/send', methods=['POST'])
 def process_gcode():
     global s
