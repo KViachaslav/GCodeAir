@@ -1,1166 +1,151 @@
-
-<!doctype html>
+<!DOCTYPE html>
 <html lang="ru">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>G-code Sender + 3D Preview</title>
-  <style>
-    :root{
-      --bg:#0b1220;
-      --panel:#121b2f;
-      --text:#e9eefc;
-      --muted:#a9b4d0;
-      --accent:#6ea8fe;
-      --danger:#ff5c7a;
-      --ok:#2dd4bf;
-      --sent:#4ade80;
-      --border:rgba(255,255,255,.12);
-      --shadow: 0 10px 30px rgba(0,0,0,.35);
-      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-      --sans: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Noto Sans", "Liberation Sans", sans-serif;
-    }
-
-    *{ box-sizing:border-box; }
-    body{
-      margin:0;
-      font-family:var(--sans);
-      background: radial-gradient(1200px 600px at 15% 10%, rgba(110,168,254,.18), transparent 55%),
-                  radial-gradient(900px 450px at 80% 20%, rgba(45,212,191,.12), transparent 55%),
-                  var(--bg);
-      color:var(--text);
-      padding: 18px;
-    }
-
-    .wrap{
-      max-width: 1500px;
-      margin: 0 auto;
-      display: grid;
-      gap: 14px;
-    }
-
-    header{
-      display:flex;
-      gap:12px;
-      align-items:flex-start;
-      justify-content:space-between;
-      flex-wrap:wrap;
-    }
-
-    .title h1{
-      margin:0;
-      font-size: 20px;
-      letter-spacing:.2px;
-    }
-    .title p{
-      margin:6px 0 0 0;
-      color:var(--muted);
-      font-size: 13px;
-      max-width: 62ch;
-      line-height: 1.35;
-    }
-
-    .card{
-      background: linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.02));
-      border: 1px solid var(--border);
-      border-radius: 14px;
-      box-shadow: var(--shadow);
-      overflow:hidden;
-    }
-
-    .grid{
-      display:grid;
-      grid-template-columns: 1.05fr 1fr 2fr;
-      gap: 14px;
-    }
-
-    @media (max-width: 1050px){
-      .grid{ grid-template-columns: 1fr; }
-    }
-
-    .section{
-      padding: 14px;
-    }
-
-    label{
-      color:var(--muted);
-      font-size: 12px;
-      display:block;
-      margin-bottom:6px;
-    }
-
-    input[type="text"], select, input[type="number"], textarea{
-      width:100%;
-      border:1px solid var(--border);
-      background: rgba(0,0,0,.15);
-      color:var(--text);
-      border-radius: 10px;
-      padding: 10px 12px;
-      outline:none;
-      font-size: 14px;
-    }
-
-    textarea{
-      min-height: 320px;
-      font-family: var(--mono);
-      white-space: pre;
-      resize: vertical;
-    }
-
-    .controls{
-      display:grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 10px;
-    }
-    @media (max-width: 520px){
-      .controls{ grid-template-columns: 1fr; }
-    }
-
-    button{
-      border:0;
-      border-radius: 12px;
-      padding: 11px 12px;
-      font-weight: 650;
-      letter-spacing:.2px;
-      cursor:pointer;
-      transition: transform .04s ease, filter .15s ease, background .15s ease;
-      background: rgba(110,168,254,.18);
-      color: var(--text);
-      border: 1px solid rgba(110,168,254,.35);
-      width: 100%;
-    }
-    button:hover{ filter: brightness(1.05); }
-    button:active{ transform: translateY(1px); }
-
-    .btn-primary{
-      background: linear-gradient(180deg, rgba(110,168,254,.35), rgba(110,168,254,.18));
-      border-color: rgba(110,168,254,.55);
-    }
-    .btn-danger{
-      background: linear-gradient(180deg, rgba(255,92,122,.28), rgba(255,92,122,.14));
-      border-color: rgba(255,92,122,.55);
-    }
-    .btn-ok{
-      background: linear-gradient(180deg, rgba(45,212,191,.28), rgba(45,212,191,.14));
-      border-color: rgba(45,212,191,.55);
-    }
-
-    .row{
-      display:flex;
-      gap:10px;
-      flex-wrap:wrap;
-      align-items:center;
-    }
-
-    .status{
-      display:flex;
-      flex-direction:column;
-      gap:10px;
-    }
-
-    .pill{
-      display:flex;
-      gap:10px;
-      align-items:center;
-      padding:10px 12px;
-      border-radius: 12px;
-      border:1px solid var(--border);
-      background: rgba(0,0,0,.12);
-    }
-
-    .dot{
-      width:10px;
-      height:10px;
-      border-radius:999px;
-      background: var(--muted);
-      box-shadow: 0 0 0 3px rgba(255,255,255,.04);
-      flex: 0 0 auto;
-    }
-    .dot.ok{ background: var(--ok); }
-    .dot.bad{ background: var(--danger); }
-
-    .pill .meta{
-      display:flex;
-      flex-direction:column;
-      gap:2px;
-      min-width: 200px;
-    }
-    .pill .meta b{ font-size: 13px; }
-    .pill .meta span{ font-size: 12px; color: var(--muted); }
-
-    .log{
-      border: 1px solid var(--border);
-      background: rgba(0,0,0,.18);
-      border-radius: 12px;
-      padding: 10px;
-      font-family: var(--mono);
-      font-size: 12px;
-      max-height: 280px;
-      overflow:auto;
-      white-space: pre-wrap;
-    }
-
-    .small{
-      font-size: 12px;
-      color: var(--muted);
-      line-height: 1.4;
-      margin-top: 10px;
-    }
-
-    .kbd{
-      font-family: var(--mono);
-      font-size: 12px;
-      border:1px solid var(--border);
-      padding:2px 6px;
-      border-radius: 8px;
-      background: rgba(255,255,255,.03);
-      color: var(--text);
-    }
-
-    .previewHeader{
-      display:flex;
-      align-items:flex-start;
-      justify-content:space-between;
-      gap:10px;
-      margin-bottom: 10px;
-    }
-
-    .segControls{
-      display:grid;
-      grid-template-columns: 1fr;
-      gap:8px;
-      width: 100%;
-    }
-
-    .segControls .tog{
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
-      gap:10px;
-      padding: 10px 12px;
-      border-radius: 12px;
-      border:1px solid var(--border);
-      background: rgba(0,0,0,.12);
-    }
-
-    .segControls input[type="checkbox"]{
-      width: 18px; height: 18px;
-      accent-color: var(--accent);
-    }
-
-    .previewFooter{
-      display:flex;
-      gap:10px;
-      flex-wrap:wrap;
-      margin-top: 10px;
-      color: var(--muted);
-      font-size: 12px;
-    }
-
-    .mono{ font-family: var(--mono); }
-
-    .btn2{
-      display:grid;
-      grid-template-columns: 1fr 1fr;
-      gap:10px;
-      width: 100%;
-    }
-    @media (max-width: 520px){
-      .btn2{ grid-template-columns: 1fr; }
-    }
-
-    #canvas3dContainer {
-      position: relative;
-    }
-
-    .loading-overlay {
-      position: absolute;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      background: rgba(0,0,0,0.7);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      border-radius: 12px;
-      z-index: 10;
-      backdrop-filter: blur(4px);
-    }
-
-    .loading-spinner {
-      color: white;
-      background: rgba(0,0,0,0.8);
-      padding: 12px 24px;
-      border-radius: 30px;
-      font-size: 14px;
-      display: flex;
-      gap: 12px;
-      align-items: center;
-    }
-
-    .spinner {
-      width: 20px;
-      height: 20px;
-      border: 2px solid rgba(255,255,255,0.3);
-      border-top-color: var(--ok);
-      border-radius: 50%;
-      animation: spin 0.8s linear infinite;
-    }
-
-    @keyframes spin {
-      to { transform: rotate(360deg); }
-    }
-
-    .progress-bar {
-      width: 100%;
-      height: 4px;
-      background: rgba(255,255,255,0.1);
-      border-radius: 2px;
-      overflow: hidden;
-      margin-top: 10px;
-    }
-
-    .progress-fill {
-      height: 100%;
-      background: linear-gradient(90deg, var(--ok), var(--accent));
-      width: 0%;
-      transition: width 0.3s ease;
-      border-radius: 2px;
-    }
-
-    .status-badge {
-      display: inline-block;
-      width: 10px;
-      height: 10px;
-      border-radius: 2px;
-      margin-right: 6px;
-    }
-    .status-unsent { background: #ff5500; }
-    .status-sent { background: #4ade80; }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GRBL Web Streamer</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .status-card { font-size: 1.1rem; font-weight: bold; }
+        .buffer-indicator { width: 20px; height: 20px; display: inline-block; border-radius: 50%; background: #dee2e6; margin-right: 5px; transition: 0.2s; }
+        .buffer-active { background: #0d6efd; box-shadow: 0 0 8px rgba(13, 110, 253, 0.5); }
+        #logWindow { 
+            height: 250px; 
+            overflow-y: auto; 
+            background: #1e1e1e; 
+            color: #4af626; 
+            padding: 15px; 
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 0.9rem;
+            border-radius: 8px;
+            border: 1px solid #333;
+        }
+        .log-entry { border-bottom: 1px solid #2a2a2a; padding: 2px 0; }
+        .log-entry:last-child { border-bottom: none; }
+    </style>
 </head>
-<body>
-<div class="wrap">
-  <header>
-    <div class="title">
-      <h1>GCodeAir</h1>
-      <p>
-        Вставьте G-code, нажмите <b>Подключить</b> и <b>Отправить</b>.
-        <span class="status-badge status-unsent"></span>Оранжевые линии — ожидают отправки, 
-        <span class="status-badge status-sent"></span>зелёные — отправлены.
-      </p>
+<body class="bg-light">
+<div class="container py-4">
+    <h3 class="mb-4 text-center">GRBL Streaming Console</h3>
+    
+    <div class="row g-4">
+        <!-- Левая панель: Управление -->
+        <div class="col-lg-6">
+            <div class="card shadow-sm h-100">
+                <div class="card-body">
+                    <h5 class="card-title">Загрузка G-Code</h5>
+                    <textarea id="gcodeArea" class="form-control mb-3" rows="12" placeholder="G0 X10 Y10..."></textarea>
+                    
+                    <div class="mb-3">
+                        <label class="form-label small">Выбрать файл (.nc, .gcode)</label>
+                        <input type="file" id="fileInput" class="form-control form-control-sm" accept=".nc,.gcode,.txt">
+                    </div>
+                    
+                    <div class="d-flex gap-2">
+                        <button id="startBtn" class="btn btn-primary flex-grow-1">ЗАПУСТИТЬ</button>
+                        <button id="stopBtn" class="btn btn-outline-danger">СТОП</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Правая панель: Статус и Логи -->
+        <div class="col-lg-6">
+            <div class="card shadow-sm h-100">
+                <div class="card-body">
+                    <h5 class="card-title">Мониторинг</h5>
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <span id="lblStatus" class="badge bg-secondary p-2 status-card">Idle</span>
+                        <div id="bufferDots">
+                            <span class="small text-muted me-2">Buffer:</span>
+                            <div class="buffer-indicator" id="dot1"></div>
+                            <div class="buffer-indicator" id="dot2"></div>
+                            <div class="buffer-indicator" id="dot3"></div>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <div class="d-flex justify-content-between small mb-1">
+                            <span>Прогресс: <strong id="lblProgress">0 / 0</strong></span>
+                            <span id="lblCurrentCmd" class="text-primary fw-bold">-</span>
+                        </div>
+                        <div class="progress" style="height: 10px;">
+                            <div id="progressBar" class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%"></div>
+                        </div>
+                    </div>
+
+                    <h6 class="mt-4 mb-2 small text-uppercase fw-bold text-muted">Консоль GRBL:</h6>
+                    <div id="logWindow">
+                        <div id="logContent"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
-    <div class="row">
-      <span class="kbd">Chrome/Edge</span>
-      <span class="kbd">WebSocket</span>
-      <span class="kbd">3D Preview</span>
-    </div>
-  </header>
-
-  <div class="grid">
-    <section class="card">
-      <div class="section">
-        <label for="gcode">G-code</label>
-        <textarea id="gcode" spellcheck="false" placeholder="Вставьте сюда ваш G-code..."></textarea>
-
-        <div class="small">
-          Превью строится по строкам с <span class="kbd">X</span>/<span class="kbd">Y</span> и командами <span class="kbd">G0</span>, <span class="kbd">G1</span>.
-          При отправке линии <span class="kbd">G1</span> меняют цвет на зелёный.
-        </div>
-
-        <div class="btn2" style="margin-top: 12px;">
-          <button class="btn-ok" id="btnPreview">Обновить превью</button>
-          <button class="btn-primary" id="btnUseDemo">Загрузить демо</button>
-          <button id="btnLoadFile">Открыть файл</button>
-          <input id="fileInput" type="file" style="display:none" accept=".gcode,.txt,.nc" />
-        </div>
-      </div>
-    </section>
-
-    <aside class="card">
-      <div class="section status">
-        <div class="pill">
-          <div id="dotConn" class="dot"></div>
-          <div class="meta">
-            <b id="connTitle">Не подключено</b>
-            <span id="connSub">Ожидание устройства...</span>
-          </div>
-        </div>
-
-        <div class="controls">
-          <div>
-            <label for="IP">IP</label>
-            <input id="IP" type="text" value="192.168.1.58" />
-          </div>
-          <div>
-            <label for="Port">Port</label>
-            <input id="Port" type="number" value="8888" min="0" step="1" />
-          </div>
-        </div>
-
-        <div class="controls">
-          <button class="btn-primary" id="btnConnect">Подключить</button>
-          <button class="btn-danger" id="btnDisconnect" disabled>Отключить</button>
-        </div>
-
-        <div class="controls">
-          <button class="btn-ok" id="btnSend" disabled>Отправить</button>
-          <button class="btn-danger" id="btnStop" disabled>Стоп</button>
-          <button class="btn-primary" id="btnResetColors" disabled>Сбросить цвета</button>
-        </div>
-
-        <div class="progress-bar">
-          <div class="progress-fill" id="progressFill"></div>
-        </div>
-
-        <label for="log">Лог</label>
-        <div class="log" id="log"></div>
-
-        <div class="small">
-          ⚡ Оптимизированная визуализация: тысячи линий без зависаний.
-        </div>
-      </div>
-    </aside>
-
-    <section class="card">
-      <div class="section">
-        <div class="previewHeader">
-          <div>
-            <div style="font-weight:800; letter-spacing:.2px; margin-bottom:6px;">3D просмотр движения</div>
-          </div>
-        </div>
-
-        <div class="segControls">
-          <div class="row">
-            <div class="tog">
-              <span>Показать оси</span>
-              <label style="margin:0;">
-                <input id="chkAxes" type="checkbox" checked />
-              </label>
-            </div>
-            <div class="tog">
-              <span>Показать сетку</span>
-              <label style="margin:0;">
-                <input id="chkGrid3d" type="checkbox" checked />
-              </label>
-            </div>
-            <div class="tog">
-              <span>Показать опорные точки</span>
-              <label style="margin:0;">
-                <input id="chkPoints" type="checkbox" />
-              </label>
-            </div>
-          </div>
-        </div>
-
-        <div style="height:10px"></div>
-
-        <div id="canvas3dContainer" style="width:100%; height:500px; background: #0a0a1a; border-radius: 12px; overflow: hidden; position: relative;">
-        </div>
-
-        <div class="previewFooter">
-          <div><span class="mono">Размеры (X/Y/Z)</span>: <span id="bbInfo">—</span></div>
-          <div><span class="mono">G1 сегментов</span>: <span id="g1SegInfo">0</span></div>
-          <div><span class="mono">G0 сегментов</span>: <span id="g0SegInfo">0</span></div>
-          <div><span class="mono">Отправлено</span>: <span id="sentCount">0</span>/<span id="totalCount">0</span></div>
-        </div>
-      </div>
-    </section>
-  </div>
 </div>
 
-<script type="importmap">
-  {
-    "imports": {
-      "three": "https://unpkg.com/three@0.128.0/build/three.module.js",
-      "three/addons/": "https://unpkg.com/three@0.128.0/examples/jsm/"
-    }
-  }
-</script>
-
-<script type="module">
-  import * as THREE from 'three';
-  import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-
-  const container = document.getElementById('canvas3dContainer');
-  const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x0a0a1a);
-  scene.fog = new THREE.FogExp2(0x0a0a1a, 0.002);
-
-  const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 2000);
-  camera.position.set(80, 60, 100);
-  camera.lookAt(0, 0, 0);
-
-  const renderer = new THREE.WebGLRenderer({ antialias: true });
-  renderer.setSize(container.clientWidth, container.clientHeight);
-  renderer.setPixelRatio(window.devicePixelRatio);
-  container.innerHTML = '';
-  container.appendChild(renderer.domElement);
-
-  function showLoading(show) {
-    let loadingDiv = document.getElementById('loadingOverlay');
-    if (show) {
-      if (!loadingDiv) {
-        loadingDiv = document.createElement('div');
-        loadingDiv.id = 'loadingOverlay';
-        loadingDiv.className = 'loading-overlay';
-        loadingDiv.innerHTML = `
-          <div class="loading-spinner">
-            <div class="spinner"></div>
-            <span>Загрузка 3D модели...</span>
-          </div>
-        `;
-        container.style.position = 'relative';
-        container.appendChild(loadingDiv);
-      }
-      loadingDiv.style.display = 'flex';
-    } else {
-      if (loadingDiv) {
-        loadingDiv.style.display = 'none';
-      }
-    }
-  }
-
-  const controls3d = new OrbitControls(camera, renderer.domElement);
-  controls3d.enableDamping = true;
-  controls3d.dampingFactor = 0.05;
-  controls3d.autoRotate = false;
-  controls3d.enableZoom = true;
-  controls3d.zoomSpeed = 1.2;
-  controls3d.target.set(0, 0, 0);
-
-  // Освещение
-  const ambientLight = new THREE.AmbientLight(0x404060);
-  scene.add(ambientLight);
-  const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
-  directionalLight.position.set(1, 2, 1);
-  scene.add(directionalLight);
-  const fillLight = new THREE.PointLight(0x445566, 0.5);
-  fillLight.position.set(0, -5, 0);
-  scene.add(fillLight);
-  const backLight = new THREE.DirectionalLight(0x88aaff, 0.4);
-  backLight.position.set(-1, 1, -1);
-  scene.add(backLight);
-
-  let axesHelper = new THREE.AxesHelper(60);
-  let gridHelper = new THREE.GridHelper(200, 40, 0x88aaff, 0x335588);
-  gridHelper.position.y = -0.1;
-  scene.add(axesHelper);
-  scene.add(gridHelper);
-
-  const chkAxes = document.getElementById('chkAxes');
-  const chkGrid3d = document.getElementById('chkGrid3d');
-  const chkPoints = document.getElementById('chkPoints');
-  
-  chkAxes.addEventListener('change', (e) => { axesHelper.visible = e.target.checked; });
-  chkGrid3d.addEventListener('change', (e) => { gridHelper.visible = e.target.checked; });
-  
-  let currentG1Lines = null;
-  let currentG0Lines = null;
-  let currentPointsGroup = null;
-  let g1SegmentColors = []; // Массив цветов для каждого сегмента G1
-  let g1ColorAttribute = null; // Ссылка на атрибут цвета для обновления
-
-  function clearTrajectory() {
-    if (currentG1Lines) {
-      scene.remove(currentG1Lines);
-      if (currentG1Lines.geometry) currentG1Lines.geometry.dispose();
-      if (currentG1Lines.material) currentG1Lines.material.dispose();
-      currentG1Lines = null;
-    }
-    if (currentG0Lines) {
-      scene.remove(currentG0Lines);
-      if (currentG0Lines.geometry) currentG0Lines.geometry.dispose();
-      if (currentG0Lines.material) currentG0Lines.material.dispose();
-      currentG0Lines = null;
-    }
-    if (currentPointsGroup) {
-      scene.remove(currentPointsGroup);
-      currentPointsGroup = null;
-    }
-    g1SegmentColors = [];
-    g1ColorAttribute = null;
-  }
-
-  function parseAndCreateLinesOptimized(gcodeText) {
-    const lines = gcodeText.split(/\r?\n/);
-    const points = [];
-    let currentX = 0, currentY = 0, currentZ = 0;
-    let lastGCode = null;
-    let lastPointType = 'G1';
-    
-    for (let raw of lines) {
-      raw = raw.trim();
-      if (raw === "") continue;
-      
-      let codeWithoutComment = raw.split(';')[0].toUpperCase().trim();
-      if (codeWithoutComment === "") continue;
-      codeWithoutComment = codeWithoutComment.replace(/\([^)]*\)/g, "").trim();
-      if (codeWithoutComment === "") continue;
-      
-      let gMatch = codeWithoutComment.match(/G(?:0|1|2|3)?\d*/i);
-      let currentGCode = null;
-      
-      if (gMatch) {
-        currentGCode = gMatch[0].toUpperCase();
-        lastGCode = currentGCode;
-        if (currentGCode === 'G0' || currentGCode === 'G1') {
-          lastPointType = currentGCode;
-        }
-      }
-      
-      let x = null, y = null, z = null;
-      const xMatch = codeWithoutComment.match(/X([+-]?\d*\.?\d+)/i);
-      const yMatch = codeWithoutComment.match(/Y([+-]?\d*\.?\d+)/i);
-      const zMatch = codeWithoutComment.match(/Z([+-]?\d*\.?\d+)/i);
-      
-      if (xMatch) x = parseFloat(xMatch[1]);
-      if (yMatch) y = parseFloat(yMatch[1]);
-      if (zMatch) z = parseFloat(zMatch[1]);
-      
-      const hasCoordinates = (x !== null || y !== null || z !== null);
-      const isMoveCommand = (currentGCode === 'G0' || currentGCode === 'G1' || 
-                             (lastGCode === 'G0' || lastGCode === 'G1') && !currentGCode);
-      
-      if (hasCoordinates && isMoveCommand) {
-        const newX = (x !== null) ? x : currentX;
-        const newY = (y !== null) ? y : currentY;
-        const newZ = (z !== null) ? z : currentZ;
-        
-        if (points.length === 0) {
-          points.push({x: currentX, y: currentY, z: currentZ, type: lastPointType});
-        }
-        
-        points.push({x: newX, y: newY, z: newZ, type: lastPointType});
-        
-        currentX = newX;
-        currentY = newY;
-        currentZ = newZ;
-      }
-      
-      if (currentGCode) {
-        lastGCode = currentGCode;
-      }
-    }
-    
-    if (points.length < 2) return null;
-    
-    // Собираем вершины для G1 и G0
-    const g1Vertices = [];
-    const g0Vertices = [];
-    const g1ColorMap = [];
-    
-    for (let i = 0; i < points.length - 1; i++) {
-      const p1 = points[i];
-      const p2 = points[i+1];
-      
-      const x1 = p1.x, y1 = p1.z, z1 = p1.y;
-      const x2 = p2.x, y2 = p2.z, z2 = p2.y;
-      
-      const dx = x2 - x1;
-      const dy = y2 - y1;
-      const dz = z2 - z1;
-      const dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
-      
-      if (dist < 0.0001) continue;
-      
-      if (p2.type === 'G1') {
-        g1Vertices.push(x1, y1, z1, x2, y2, z2);
-        g1ColorMap.push(0xff5500); // Начальный цвет оранжевый
-      } else if (p2.type === 'G0') {
-        g0Vertices.push(x1, y1, z1, x2, y2, z2);
-      }
-    }
-    
-    // Создаём LinesSegments для G1 с поддержкой цвета на сегмент
-    let g1LinesObj = null;
-    if (g1Vertices.length > 0) {
-      const geometry = new THREE.BufferGeometry();
-      geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(g1Vertices), 3));
-      
-      // Создаём массив цветов для каждой вершины (по 3 float на вершину)
-      const colors = new Float32Array(g1Vertices.length);
-      for (let i = 0; i < g1ColorMap.length; i++) {
-        const color = new THREE.Color(g1ColorMap[i]);
-        // Каждый сегмент состоит из 2 вершин, записываем цвет для обеих
-        for (let j = 0; j < 2; j++) {
-          colors[i * 6 + j * 3] = color.r;
-          colors[i * 6 + j * 3 + 1] = color.g;
-          colors[i * 6 + j * 3 + 2] = color.b;
-        }
-      }
-      geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-      
-      const material = new THREE.LineBasicMaterial({ vertexColors: true, linewidth: 2 });
-      g1LinesObj = new THREE.LineSegments(geometry, material);
-      
-      // Сохраняем данные для последующего обновления цветов
-      g1SegmentColors = g1ColorMap.map(c => ({ color: c, sent: false }));
-    }
-    
-    // G0 линии (серо-голубые, не меняют цвет)
-    let g0LinesObj = null;
-    if (g0Vertices.length > 0) {
-      const geometry = new THREE.BufferGeometry();
-      geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(g0Vertices), 3));
-      const material = new THREE.LineBasicMaterial({ color: 0x88aacc, linewidth: 1, transparent: true, opacity: 0.5 });
-      g0LinesObj = new THREE.LineSegments(geometry, material);
-    }
-    
-    document.getElementById('g1SegInfo').textContent = g1SegmentColors.length;
-    document.getElementById('g0SegInfo').textContent = (g0Vertices.length / 6).toFixed(0);
-    document.getElementById('totalCount').textContent = g1SegmentColors.length;
-    document.getElementById('sentCount').textContent = '0';
-    
-    // Вычисляем bounding box
-    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, minZ = Infinity, maxZ = -Infinity;
-    points.forEach(p => {
-      minX = Math.min(minX, p.x);
-      maxX = Math.max(maxX, p.x);
-      minY = Math.min(minY, p.y);
-      maxY = Math.max(maxY, p.y);
-      minZ = Math.min(minZ, p.z);
-      maxZ = Math.max(maxZ, p.z);
-    });
-    
-    const sizeX = (maxX - minX).toFixed(1);
-    const sizeY = (maxY - minY).toFixed(1);
-    const sizeZ = (maxZ - minZ).toFixed(1);
-    document.getElementById('bbInfo').textContent = `${sizeX} / ${sizeY} / ${sizeZ}`;
-    
-    // Опорные точки (опционально)
-    const pointsGroup = new THREE.Group();
-    const sphereGeometry = new THREE.SphereGeometry(0.3, 4, 4);
-    const sphereMaterial = new THREE.MeshStandardMaterial({ color: 0xffaa55, emissive: 0x331100 });
-    
-    const step = Math.max(1, Math.floor(points.length / 800));
-    for (let i = 0; i < points.length; i += step) {
-      const sphere = new THREE.Mesh(sphereGeometry, sphereMaterial);
-      sphere.position.set(points[i].x, points[i].z, points[i].y);
-      pointsGroup.add(sphere);
-    }
-    
-    return { g1Lines: g1LinesObj, g0Lines: g0LinesObj, pointsGroup: pointsGroup, g1Count: g1SegmentColors.length };
-  }
-  
-  // Функция для обновления цвета отправленного сегмента
-  window.markSegmentAsSent = function(segmentIndex) {
-    if (segmentIndex < g1SegmentColors.length && !g1SegmentColors[segmentIndex].sent && currentG1Lines) {
-      g1SegmentColors[segmentIndex].sent = true;
-      g1SegmentColors[segmentIndex].color = 0x4ade80;
-      
-      // Обновляем атрибут цвета в геометрии
-      const geometry = currentG1Lines.geometry;
-      const colorAttribute = geometry.attributes.color;
-      if (colorAttribute) {
-        const color = new THREE.Color(0x4ade80);
-        // Обновляем обе вершины сегмента
-        for (let j = 0; j < 2; j++) {
-          colorAttribute.setXYZ(segmentIndex * 2 + j, color.r, color.g, color.b);
-        }
-        colorAttribute.needsUpdate = true;
-      }
-      
-      // Обновляем счётчик
-      const sentCount = g1SegmentColors.filter(s => s.sent).length;
-      document.getElementById('sentCount').textContent = sentCount;
-      const progress = (sentCount / g1SegmentColors.length) * 100;
-      document.getElementById('progressFill').style.width = progress + '%';
-    }
-  };
-  
-  // Функция для сброса цветов
-  window.resetColors = function() {
-    if (currentG1Lines && g1SegmentColors.length > 0) {
-      const geometry = currentG1Lines.geometry;
-      const colorAttribute = geometry.attributes.color;
-      if (colorAttribute) {
-        for (let i = 0; i < g1SegmentColors.length; i++) {
-          g1SegmentColors[i].sent = false;
-          g1SegmentColors[i].color = 0xff5500;
-          const color = new THREE.Color(0xff5500);
-          for (let j = 0; j < 2; j++) {
-            colorAttribute.setXYZ(i * 2 + j, color.r, color.g, color.b);
-          }
-        }
-        colorAttribute.needsUpdate = true;
-      }
-      document.getElementById('sentCount').textContent = '0';
-      document.getElementById('progressFill').style.width = '0%';
-    }
-  };
-  
-  window.updateGCodeVisualization = function(gcodeText) {
-    showLoading(true);
-    
-    // Используем setTimeout для асинхронной обработки, чтобы не блокировать UI
-    setTimeout(() => {
-      try {
-        clearTrajectory();
-        const result = parseAndCreateLinesOptimized(gcodeText);
-        if (result) {
-          if (result.g1Lines) {
-            currentG1Lines = result.g1Lines;
-            scene.add(currentG1Lines);
-          }
-          if (result.g0Lines) {
-            currentG0Lines = result.g0Lines;
-            scene.add(currentG0Lines);
-          }
-          if (result.pointsGroup && chkPoints.checked) {
-            currentPointsGroup = result.pointsGroup;
-            scene.add(currentPointsGroup);
-          }
-          
-          // Центрируем камеру
-          if (currentG1Lines) {
-            const box = new THREE.Box3().setFromObject(currentG1Lines);
-            if (!box.isEmpty()) {
-              const center = box.getCenter(new THREE.Vector3());
-              controls3d.target.copy(center);
-              const size = box.getSize(new THREE.Vector3());
-              const maxDim = Math.max(size.x, size.y, size.z);
-              const distance = maxDim * 1.5;
-              camera.position.set(distance * 0.8, distance * 0.6, distance);
-              controls3d.update();
-            }
-          }
-        }
-      } catch(e) {
-        console.error('Ошибка визуализации:', e);
-      } finally {
-        showLoading(false);
-      }
-    }, 50);
-  };
-  
-  chkPoints.addEventListener('change', (e) => {
-    if (currentPointsGroup) {
-      if (e.target.checked) {
-        scene.add(currentPointsGroup);
-      } else {
-        scene.remove(currentPointsGroup);
-      }
-    }
-  });
-  
-  function animate() {
-    requestAnimationFrame(animate);
-    controls3d.update();
-    renderer.render(scene, camera);
-  }
-  animate();
-  
-  window.addEventListener('resize', () => {
-    const width = container.clientWidth;
-    const height = container.clientHeight;
-    camera.aspect = width / height;
-    camera.updateProjectionMatrix();
-    renderer.setSize(width, height);
-  });
-  
-  // Звёздный фон
-  const starGeometry = new THREE.BufferGeometry();
-  const starCount = 800;
-  const starPositions = [];
-  for (let i = 0; i < starCount; i++) {
-    starPositions.push((Math.random() - 0.5) * 500);
-    starPositions.push((Math.random() - 0.5) * 300);
-    starPositions.push((Math.random() - 0.5) * 200 - 100);
-  }
-  starGeometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(starPositions), 3));
-  const starMaterial = new THREE.PointsMaterial({ color: 0xffffff, size: 0.2 });
-  const stars = new THREE.Points(starGeometry, starMaterial);
-  scene.add(stars);
-  
-  console.log('3D визуализация готова (оптимизированная версия)');
-</script>
-
 <script>
-  const $ = (id) => document.getElementById(id);
+    let lastLogCount = 0;
 
-  const dotConn = $("dotConn");
-  const connTitle = $("connTitle");
-  const connSub = $("connSub");
-  const logEl = $("log");
+    // Чтение файла
+    document.getElementById('fileInput').addEventListener('change', function(e) {
+        let file = e.target.files[0];
+        if (!file) return;
+        let reader = new FileReader();
+        reader.onload = (e) => document.getElementById('gcodeArea').value = e.target.result;
+        reader.readAsText(file);
+    });
 
-  const gcodeEl = $("gcode");
-  const IPEl = $("IP");
-  const PortEl = $("Port");
+    // Запуск
+    document.getElementById('startBtn').addEventListener('click', function() {
+        let gcode = document.getElementById('gcodeArea').value;
+        if(!gcode.trim()) return alert("Введите G-код");
 
-  const btnConnect = $("btnConnect");
-  const btnDisconnect = $("btnDisconnect");
-  const btnSend = $("btnSend");
-  const btnStop = $("btnStop");
-  const btnPreview = $("btnPreview");
-  const btnUseDemo = $("btnUseDemo");
-  const btnLoadFile = $("btnLoadFile");
-  const btnResetColors = $("btnResetColors");
-  const fileInput = $("fileInput");
+        let formData = new FormData();
+        formData.append('gcode', gcode);
 
-  let stopRequested = false;
-  let g1LineIndex = 0;
+        fetch('/upload', { method: 'POST', body: formData })
+        .then(res => res.json())
+        .then(data => { if(data.error) alert(data.error); });
+    });
 
-  function log(msg) {
-    const ts = new Date().toLocaleTimeString();
-    logEl.textContent += `[${ts}] ${msg}\n`;
-    logEl.scrollTop = logEl.scrollHeight;
-  }
+    // Стоп
+    document.getElementById('stopBtn').addEventListener('click', () => fetch('/stop', { method: 'POST' }));
 
-  function setConnected(connected, sub = "") {
-    if (connected) {
-      dotConn.classList.add("ok");
-      dotConn.classList.remove("bad");
-      connTitle.textContent = "Подключено";
-      connSub.textContent = sub || "Соединение установлено";
-      btnDisconnect.disabled = false;
-      btnSend.disabled = false;
-      btnStop.disabled = false;
-      btnResetColors.disabled = false;
-    } else {
-      dotConn.classList.remove("ok");
-      dotConn.classList.add("bad");
-      connTitle.textContent = "Не подключено";
-      connSub.textContent = sub || "Ожидание устройства...";
-      btnDisconnect.disabled = true;
-      btnSend.disabled = true;
-      btnStop.disabled = true;
-      btnResetColors.disabled = true;
-    }
-  }
+    // Цикл обновления
+    setInterval(() => {
+        fetch('/status')
+        .then(res => res.json())
+        .then(data => {
+            // Обновление текста статуса
+            const statusEl = document.getElementById('lblStatus');
+            statusEl.innerText = data.status;
+            statusEl.className = `badge status-card ${data.status === 'Streaming' ? 'bg-primary' : data.status === 'Finished' ? 'bg-success' : 'bg-danger'}`;
+            
+            // Прогресс и команда
+            document.getElementById('lblCurrentCmd').innerText = data.current_command || "Wait...";
+            document.getElementById('lblProgress').innerText = `${data.sent_lines} / ${data.total_lines}`;
+            let percent = data.total_lines > 0 ? (data.sent_lines / data.total_lines) * 100 : 0;
+            document.getElementById('progressBar').style.width = percent + "%";
 
-  function normalizeGcode(text) {
-    return text.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n");
-  }
+            // Индикация буфера
+            for(let i=1; i<=3; i++) {
+                document.getElementById('dot'+i).classList.toggle('buffer-active', data.buffer_slots >= i);
+            }
 
-  function extractLinesAndCountG1(gcodeText) {
-    const lines = normalizeGcode(gcodeText).split("\n");
-    const cleaned = [];
-    const g1LineNumbers = [];
-    let lineNum = 0;
-    
-    for (let line of lines) {
-      let processed = line.replace(/;.*$/g, "");
-      processed = processed.replace(/\([^)]*\)/g, "");
-      const trimmed = processed.trim();
-      if (!trimmed) continue;
-      
-      cleaned.push(trimmed);
-      if (/\bG1\b/i.test(trimmed)) {
-        g1LineNumbers.push(lineNum);
-      }
-      lineNum++;
-    }
-    
-    return { lines: cleaned, g1LineNumbers };
-  }
-
-  async function connectToESP() {
-    log(`Подключение к ${IPEl.value}:${PortEl.value}...`);
-    try {
-      const response = await fetch('/connect', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ip: IPEl.value, port: PortEl.value })
-      });
-      
-      if (!response.ok) {
-        const errorData = await response.json();
-        log(`Ошибка: ${response.status} - ${errorData.message || 'Неизвестная ошибка'}`);
-        setConnected(false);
-        return;
-      }
-      
-      const data = await response.json();
-      if (data.status === "connect") {
-        setConnected(true, `${IPEl.value}:${PortEl.value}`);
-        log("Подключено успешно");
-      } else {
-        setConnected(false);
-        log("Ошибка подключения");
-      }
-    } catch (error) {
-      log(`Ошибка подключения: ${error.message}`);
-      setConnected(false);
-    }
-  }
-
-  async function disconnectESP() {
-    try {
-      const response = await fetch('/disconnect');
-      const data = await response.json();
-      log(data.status || "Отключено");
-      setConnected(false);
-    } catch (error) {
-      log(`Ошибка отключения: ${error.message}`);
-      setConnected(false);
-    }
-  }
-
-  btnResetColors.addEventListener('click', () => {
-    if (window.resetColors) {
-      window.resetColors();
-      log("Цвета линий сброшены");
-    }
-  });
-
-  btnSend.addEventListener('click', async () => {
-    stopRequested = false;
-    const gcodeText = gcodeEl.value;
-    const { lines, g1LineNumbers } = extractLinesAndCountG1(gcodeText);
-    
-    if (lines.length === 0) {
-      log("Нет G-code для отправки");
-      return;
-    }
-    
-    if (window.resetColors) {
-      window.resetColors();
-    }
-    
-    log(`Начало отправки (${lines.length} строк, G1 команд: ${g1LineNumbers.length})`);
-    
-    let g1Sent = 0;
-    
-    for (let i = 0; i < lines.length; i++) {
-      if (stopRequested) {
-        log("⏹️ Отправка прервана");
-        break;
-      }
-      
-      const line = lines[i];
-      const isG1 = g1LineNumbers.includes(g1Sent);
-      
-      try {
-        const response = await fetch('/send', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ gcode: line })
+            // Обновление логов
+            if (data.logs && data.logs.length !== lastLogCount) {
+                const logContent = document.getElementById('logContent');
+                const logWindow = document.getElementById('logWindow');
+                
+                logContent.innerHTML = data.logs.map(line => `<div class="log-entry">> ${line}</div>`).join('');
+                
+                // Скролл вниз если лог обновился
+                logWindow.scrollTop = logWindow.scrollHeight;
+                lastLogCount = data.logs.length;
+            }
         });
-        
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
-        }
-        
-        const data = await response.json();
-        log(`✅ ${line} → ${data.status || 'OK'}`);
-        
-        if (isG1 && window.markSegmentAsSent) {
-          window.markSegmentAsSent(g1Sent);
-        }
-        
-        if (isG1) {
-          g1Sent++;
-        }
-        
-      } catch (error) {
-        log(`❌ Ошибка на строке "${line}": ${error.message}`);
-        break;
-      }
-    }
-    
-    log(`✅ Отправка завершена. Отправлено G1 команд: ${g1Sent}`);
-  });
-
-  btnStop.addEventListener("click", () => {
-    stopRequested = true;
-    log("⏹️ Команда остановки отправлена");
-  });
-
-  btnConnect.addEventListener("click", connectToESP);
-  btnDisconnect.addEventListener("click", disconnectESP);
-
-  btnPreview.addEventListener("click", () => {
-    const gcode = gcodeEl.value;
-    if (gcode.trim()) {
-      window.updateGCodeVisualization(gcode);
-      log("3D превью обновлено");
-    } else {
-      log("Нет G-code для отображения");
-    }
-  });
-
-  btnUseDemo.addEventListener("click", () => {
-    const demoGcode = `; Демо G-code
-G21
-G90
-G0 X0 Y0 Z0
-G1 X20 Y0 Z0 F1500
-G1 X20 Y20 Z0
-G1 X0 Y20 Z0
-G1 X0 Y0 Z0
-G0 X25 Y25
-G1 X35 Y25 Z0
-G1 X35 Y35 Z0
-G1 X25 Y35 Z0
-G1 X25 Y25 Z0
-G0 X40 Y40
-G1 X50 Y40 Z0
-G1 X50 Y50 Z0
-G1 X40 Y50 Z0
-G1 X40 Y40 Z0
-M30`;
-    gcodeEl.value = demoGcode;
-    window.updateGCodeVisualization(demoGcode);
-    log("Демо G-code загружен");
-  });
-
-  btnLoadFile.addEventListener("click", () => {
-    fileInput.click();
-  });
-
-  fileInput.addEventListener("change", () => {
-    const file = fileInput.files[0];
-    if (!file) return;
-    
-    log(`Чтение файла: ${file.name}`);
-    const reader = new FileReader();
-    
-    reader.onload = (e) => {
-      const content = e.target.result;
-      gcodeEl.value = content;
-      window.updateGCodeVisualization(content);
-      log(`Файл "${file.name}" загружен (${content.length} символов)`);
-    };
-    
-    reader.onerror = () => {
-      log(`Ошибка чтения файла "${file.name}"`);
-    };
-    
-    reader.readAsText(file);
-  });
-
-  let tmr = null;
-  gcodeEl.addEventListener("input", () => {
-    clearTimeout(tmr);
-    tmr = setTimeout(() => {
-      const gcode = gcodeEl.value;
-      if (gcode.trim()) {
-        window.updateGCodeVisualization(gcode);
-      }
-    }, 800);
-  });
-
-  gcodeEl.value = `; Пример G-code с большим количеством линий
-G21
-G90
-G0 X0 Y0 Z0
-G1 X50 Y0 Z0 F1500
-G1 X50 Y50 Z0
-G1 X0 Y50 Z0
-G1 X0 Y0 Z0
-G0 X10 Y10
-G1 X40 Y10 Z0
-G1 X40 Y40 Z0
-G1 X10 Y40 Z0
-G1 X10 Y10 Z0
-M30`;
-  setConnected(false);
-  
-  setTimeout(() => {
-    window.updateGCodeVisualization(gcodeEl.value);
-  }, 500);
+    }, 200);
 </script>
 </body>
 </html>

@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>GCodeAir - Professional Control</title>
+    <style>
+        :root {
+            --bg: #0b1220; --panel: #121b2f; --text: #e9eefc; --muted: #a9b4d0;
+            --accent: #6ea8fe; --danger: #ff5c7a; --ok: #2dd4bf; --sent: #4ade80;
+            --border: rgba(255,255,255,.12); --shadow: 0 10px 30px rgba(0,0,0,.35);
+        }
+        body {
+            margin: 0; font-family: system-ui, -apple-system, sans-serif;
+            background: var(--bg); color: var(--text); padding: 20px;
+        }
+        .grid-layout {
+            display: grid; grid-template-columns: 350px 1fr 400px; gap: 20px; max-width: 1800px; margin: 0 auto;
+        }
+        .card {
+            background: var(--panel); border: 1px solid var(--border);
+            border-radius: 12px; padding: 15px; box-shadow: var(--shadow);
+        }
+        textarea {
+            width: 100%; height: 300px; background: #000; color: #fff;
+            border: 1px solid var(--border); border-radius: 8px; padding: 10px;
+            font-family: monospace; resize: none; outline: none;
+        }
+        button {
+            padding: 10px; cursor: pointer; border-radius: 6px; border: 1px solid var(--accent);
+            background: rgba(110,168,254,0.1); color: var(--text); transition: 0.2s;
+        }
+        button:hover { background: rgba(110,168,254,0.3); }
+        button:disabled { opacity: 0.3; cursor: not-allowed; }
+        .log {
+            height: 200px; overflow-y: auto; background: #000;
+            border-radius: 8px; padding: 10px; font-family: monospace; font-size: 12px; margin-top: 10px;
+        }
+        .log-entry { margin-bottom: 4px; border-bottom: 1px solid rgba(255,255,255,0.05); }
+        .sent { color: var(--accent); }
+        .resp-text { color: var(--sent); font-weight: bold; margin-left: 10px; }
+        .status-bar {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 10px; background: rgba(0,0,0,0.3); border-radius: 8px; margin-bottom: 10px;
+        }
+        .dot { width: 10px; height: 10px; border-radius: 50%; background: grey; display: inline-block; }
+        .dot.ok { background: var(--ok); box-shadow: 0 0 10px var(--ok); }
+        #canvas3dContainer { width: 100%; height: 500px; background: #000; border-radius: 12px; }
+        .coords span { color: var(--sent); font-weight: bold; margin-right: 10px; }
+    </style>
+</head>
+<body>
+
+<div class="grid-layout">
+    <!-- ЛЕВАЯ ПАНЕЛЬ: ВВОД -->
+    <div class="card">
+        <h3>G-CODE</h3>
+        <textarea id="gcode" placeholder="G1 X10 Y10 F500..."></textarea>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px;">
+            <button onclick="updateGCodeVisualization(document.getElementById('gcode').value)">ПРЕВЬЮ 3D</button>
+            <button id="btnSend" disabled style="border-color: var(--ok); color: var(--ok);">ПУСК</button>
+        </div>
+    </div>
+
+    <!-- ЦЕНТР: 3D -->
+    <div class="card">
+        <div class="status-bar">
+            <div>
+                <div id="dotConn" class="dot"></div>
+                <span id="connTitle">ОТКЛЮЧЕНО</span>
+            </div>
+            <div class="coords">
+                X: <span id="posX">0.00</span>
+                Y: <span id="posY">0.00</span>
+                Z: <span id="posZ">0.00</span>
+            </div>
+            <div id="connSub">Статус: -</div>
+        </div>
+        <div id="canvas3dContainer"></div>
+    </div>
+
+    <!-- ПРАВАЯ ПАНЕЛЬ: КОНТРОЛЬ -->
+    <div class="card">
+        <h3>УПРАВЛЕНИЕ</h3>
+        <div style="display: flex; gap: 5px; margin-bottom: 10px;">
+            <input id="IP" type="text" value="192.168.1.58" style="width: 70%; background: #000; color: #fff; border: 1px solid var(--border); padding: 5px;">
+            <input id="Port" type="text" value="81" style="width: 25%; background: #000; color: #fff; border: 1px solid var(--border); padding: 5px;">
+        </div>
+        <button id="btnConnect" style="width: 100%; margin-bottom: 10px;">ПОДКЛЮЧИТЬСЯ</button>
+        
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 5px;">
+            <button onclick="uiCmd('$X')">РАЗБЛОКИРОВАТЬ</button>
+            <button onclick="uiCmd('$H')">ДОМОЙ</button>
+            <button onclick="uiCmd('G92 X0 Y0 Z0')">ОБНУЛИТЬ XYZ</button>
+            <button id="btnStop" class="btn-danger" style="color: var(--danger); border-color: var(--danger);">СТОП (!)</button>
+        </div>
+
+        <div id="log" class="log"></div>
+    </div>
+</div>
+
+<!-- ПОДКЛЮЧЕНИЕ THREE.JS -->
+<script type="importmap">
+{
+    "imports": {
+        "three": "https://unpkg.com/three@0.128.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.128.0/examples/jsm/"
+    }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+let socket = null;
+let isSending = false;
+let gcodeQueue = [];
+let currentLineIdx = 0;
+let lastSentCommand = "";
+let statusInterval = null;
+
+// --- 3D SETUP ---
+const container = document.getElementById('canvas3dContainer');
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0a0a1a);
+
+const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 2000);
+camera.position.set(100, 100, 150);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(container.clientWidth, container.clientHeight);
+renderer.setPixelRatio(window.devicePixelRatio);
+container.appendChild(renderer.domElement);
+
+const controls3d = new OrbitControls(camera, renderer.domElement);
+controls3d.enableDamping = true;
+
+scene.add(new THREE.AmbientLight(0x404060));
+scene.add(new THREE.GridHelper(200, 40, 0x222244, 0x111122));
+
+let currentG1Lines = null;
+
+// --- WEBSOCKET LOGIC ---
+function connect() {
+    const ip = document.getElementById('IP').value;
+    const port = document.getElementById('Port').value;
+    log(`Попытка соединения...`, 'system');
+    
+    socket = new WebSocket(`ws://${ip}:${port}`);
+
+    socket.onopen = () => {
+        document.getElementById('dotConn').className = 'dot ok';
+        document.getElementById('connTitle').innerText = 'В СЕТИ';
+        document.getElementById('btnConnect').disabled = true;
+        document.getElementById('btnSend').disabled = false;
+        log("Соединение установлено", "system");
+
+        // ОПРОС СТАТУСА
+        statusInterval = setInterval(() => {
+            if (socket.readyState === 1) socket.send('?');
+        }, 500);
+    };
+
+    socket.onclose = () => {
+        clearInterval(statusInterval);
+        document.getElementById('dotConn').className = 'dot';
+        document.getElementById('connTitle').innerText = 'ОФФЛАЙН';
+        document.getElementById('btnConnect').disabled = false;
+        log("Соединение разорвано", "danger");
+    };
+
+    socket.onmessage = (event) => {
+        const rawMsg = event.data;
+
+        // Обработка статус-сообщения <...>
+        if (rawMsg.includes('<') && rawMsg.includes('>')) {
+            const match = rawMsg.match(/<([^>]+)>/);
+            if (match) parseStatus(match[1]);
+            return; 
+        }
+
+        const cleanMsg = rawMsg.trim();
+        if (cleanMsg) {
+            appendResponse(cleanMsg);
+            if (isSending && cleanMsg.toLowerCase().includes('ok')) {
+                // Если команда была G1, красим сегмент в 3D (если реализовано в парсере)
+                if (lastSentCommand.toUpperCase().includes('G1')) {
+                    markSegmentAsSent(currentLineIdx - 1);
+                }
+                sendNextFromQueue();
+            }
+        }
+    };
+}
+
+function parseStatus(str) {
+    const parts = str.split('|');
+    document.getElementById('connSub').innerText = "Статус: " + parts[0];
+    
+    parts.forEach(p => {
+        if (p.startsWith('MPos:')) {
+            const c = p.replace('MPos:', '').split(',');
+            document.getElementById('posX').innerText = c[0];
+            document.getElementById('posY').innerText = c[1];
+            document.getElementById('posZ').innerText = c[2];
+        }
+    });
+}
+
+function sendCommand(cmd, silent = false) {
+    if (!socket || socket.readyState !== 1) return;
+    lastSentCommand = cmd;
+    
+    // Команды реального времени (!, ?, ~) шлем без \n
+    const isRealTime = ['?', '!', '~'].includes(cmd);
+    socket.send(isRealTime ? cmd : cmd + '\n');
+    
+    if (!silent) log(`> ${cmd}`, 'sent');
+}
+
+function sendNextFromQueue() {
+    if (isSending && currentLineIdx < gcodeQueue.length) {
+        const line = gcodeQueue[currentLineIdx].trim();
+        if (!line || line.startsWith(';')) {
+            currentLineIdx++;
+            sendNextFromQueue();
+        } else {
+            sendCommand(line);
+            currentLineIdx++;
+        }
+    } else {
+        isSending = false;
+        log("Программа завершена", "system");
+    }
+}
+
+// --- UI & LOG ---
+function log(msg, type) {
+    const l = document.getElementById('log');
+    const d = document.createElement('div');
+    d.className = `log-entry ${type}`;
+    d.innerHTML = `<span>${msg}</span><span class="resp-text"></span>`;
+    l.appendChild(d);
+    l.scrollTop = l.scrollHeight;
+}
+
+function appendResponse(resp) {
+    const entries = document.querySelectorAll('.log-entry');
+    if (entries.length > 0) {
+        const last = entries[entries.length - 1].querySelector('.resp-text');
+        if (last) last.innerText = ` ← ${resp}`;
+    }
+}
+
+// --- VISUALIZATION STUB (Здесь должен быть твой сложный парсер) ---
+window.updateGCodeVisualization = function(text) {
+    log("Обновление 3D...", "system");
+    // Тут вызывается твоя функция parseAndCreateLinesOptimized
+    // Пример упрощенной очистки:
+    if (currentG1Lines) scene.remove(currentG1Lines);
+};
+
+function markSegmentAsSent(idx) {
+    // Логика смены цвета BufferGeometry
+}
+
+// --- EVENTS ---
+document.getElementById('btnConnect').onclick = connect;
+document.getElementById('btnSend').onclick = () => {
+    const text = document.getElementById('gcode').value;
+    gcodeQueue = text.split('\n');
+    currentLineIdx = 0;
+    isSending = true;
+    sendNextFromQueue();
+};
+document.getElementById('btnStop').onclick = () => {
+    isSending = false;
+    sendCommand('!', true);
+    log("АВАРИЙНЫЙ ОСТАНОВ", "danger");
+};
+window.uiCmd = (c) => sendCommand(c);
+
+function animate() {
+    requestAnimationFrame(animate);
+    controls3d.update();
+    renderer.render(scene, camera);
+}
+animate();
+
+window.addEventListener('resize', () => {
+    camera.aspect = container.clientWidth / container.clientHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(container.clientWidth, container.clientHeight);
+});
+</script>
+
+</body>
+</html>

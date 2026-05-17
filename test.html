@@ -1,0 +1,930 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>G-code Sender + 3D Preview</title>
+  <style>
+    :root{
+      --bg:#0b1220;
+      --panel:#121b2f;
+      --text:#e9eefc;
+      --muted:#a9b4d0;
+      --accent:#6ea8fe;
+      --danger:#ff5c7a;
+      --ok:#2dd4bf;
+      --sent:#4ade80;
+      --border:rgba(255,255,255,.12);
+      --shadow: 0 10px 30px rgba(0,0,0,.35);
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      --sans: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Noto Sans", "Liberation Sans", sans-serif;
+    }
+
+    *{ box-sizing:border-box; }
+    body{
+      margin:0;
+      font-family:var(--sans);
+      background: radial-gradient(1200px 600px at 15% 10%, rgba(110,168,254,.18), transparent 55%),
+                  radial-gradient(900px 450px at 80% 20%, rgba(45,212,191,.12), transparent 55%),
+                  var(--bg);
+      color:var(--text);
+      padding: 18px;
+    }
+
+    .wrap{
+      max-width: 1500px;
+      margin: 0 auto;
+      display: grid;
+      gap: 14px;
+    }
+
+    header{
+      display:flex;
+      gap:12px;
+      align-items:flex-start;
+      justify-content:space-between;
+      flex-wrap:wrap;
+    }
+
+    .title h1{
+      margin:0;
+      font-size: 20px;
+      letter-spacing:.2px;
+    }
+    .title p{
+      margin:6px 0 0 0;
+      color:var(--muted);
+      font-size: 13px;
+      max-width: 62ch;
+      line-height: 1.35;
+    }
+
+    .card{
+      background: linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.02));
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      box-shadow: var(--shadow);
+      overflow:hidden;
+    }
+
+    .grid{
+      display:grid;
+      grid-template-columns: 1.05fr 1fr 2fr;
+      gap: 14px;
+    }
+
+    @media (max-width: 1050px){
+      .grid{ grid-template-columns: 1fr; }
+    }
+
+    .section{
+      padding: 14px;
+    }
+
+    label{
+      color:var(--muted);
+      font-size: 12px;
+      display:block;
+      margin-bottom:6px;
+    }
+
+    input[type="text"], select, input[type="number"], textarea{
+      width:100%;
+      border:1px solid var(--border);
+      background: rgba(0,0,0,.15);
+      color:var(--text);
+      border-radius: 10px;
+      padding: 10px 12px;
+      outline:none;
+      font-size: 14px;
+    }
+
+    textarea{
+      min-height: 320px;
+      font-family: var(--mono);
+      white-space: pre;
+      resize: vertical;
+    }
+
+    .controls{
+      display:grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+    @media (max-width: 520px){
+      .controls{ grid-template-columns: 1fr; }
+    }
+
+    button{
+      border:0;
+      border-radius: 12px;
+      padding: 11px 12px;
+      font-weight: 650;
+      letter-spacing:.2px;
+      cursor:pointer;
+      transition: transform .04s ease, filter .15s ease, background .15s ease;
+      background: rgba(110,168,254,.18);
+      color: var(--text);
+      border: 1px solid rgba(110,168,254,.35);
+      width: 100%;
+    }
+    button:hover{ filter: brightness(1.05); }
+    button:active{ transform: translateY(1px); }
+
+    .btn-primary{
+      background: linear-gradient(180deg, rgba(110,168,254,.35), rgba(110,168,254,.18));
+      border-color: rgba(110,168,254,.55);
+    }
+    .btn-danger{
+      background: linear-gradient(180deg, rgba(255,92,122,.28), rgba(255,92,122,.14));
+      border-color: rgba(255,92,122,.55);
+    }
+    .btn-ok{
+      background: linear-gradient(180deg, rgba(45,212,191,.28), rgba(45,212,191,.14));
+      border-color: rgba(45,212,191,.55);
+    }
+
+    .row{
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+      align-items:center;
+    }
+
+    .status{
+      display:flex;
+      flex-direction:column;
+      gap:10px;
+    }
+
+    .pill{
+      display:flex;
+      gap:10px;
+      align-items:center;
+      padding:10px 12px;
+      border-radius: 12px;
+      border:1px solid var(--border);
+      background: rgba(0,0,0,.12);
+    }
+
+    .dot{
+      width:10px;
+      height:10px;
+      border-radius:999px;
+      background: var(--muted);
+      box-shadow: 0 0 0 3px rgba(255,255,255,.04);
+      flex: 0 0 auto;
+    }
+    .dot.ok{ background: var(--ok); }
+    .dot.bad{ background: var(--danger); }
+
+    .pill .meta{
+      display:flex;
+      flex-direction:column;
+      gap:2px;
+      min-width: 200px;
+    }
+    .pill .meta b{ font-size: 13px; }
+    .pill .meta span{ font-size: 12px; color: var(--muted); }
+
+    .log{
+      border: 1px solid var(--border);
+      background: rgba(0,0,0,.18);
+      border-radius: 12px;
+      padding: 10px;
+      font-family: var(--mono);
+      font-size: 12px;
+      max-height: 280px;
+      overflow:auto;
+      white-space: pre-wrap;
+    }
+
+    .small{
+      font-size: 12px;
+      color: var(--muted);
+      line-height: 1.4;
+      margin-top: 10px;
+    }
+
+    .kbd{
+      font-family: var(--mono);
+      font-size: 12px;
+      border:1px solid var(--border);
+      padding:2px 6px;
+      border-radius: 8px;
+      background: rgba(255,255,255,.03);
+      color: var(--text);
+    }
+
+    .previewHeader{
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:10px;
+      margin-bottom: 10px;
+    }
+
+    .segControls{
+      display:grid;
+      grid-template-columns: 1fr;
+      gap:8px;
+      width: 100%;
+    }
+
+    .segControls .tog{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      padding: 10px 12px;
+      border-radius: 12px;
+      border:1px solid var(--border);
+      background: rgba(0,0,0,.12);
+    }
+
+    .segControls input[type="checkbox"]{
+      width: 18px; height: 18px;
+      accent-color: var(--accent);
+    }
+
+    .previewFooter{
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .mono{ font-family: var(--mono); }
+
+    .btn2{
+      display:grid;
+      grid-template-columns: 1fr 1fr;
+      gap:10px;
+      width: 100%;
+    }
+    @media (max-width: 520px){
+      .btn2{ grid-template-columns: 1fr; }
+    }
+
+    #canvas3dContainer {
+      position: relative;
+    }
+
+    .loading-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0,0,0,0.7);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 12px;
+      z-index: 10;
+      backdrop-filter: blur(4px);
+    }
+
+    .loading-spinner {
+      color: white;
+      background: rgba(0,0,0,0.8);
+      padding: 12px 24px;
+      border-radius: 30px;
+      font-size: 14px;
+      display: flex;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .spinner {
+      width: 20px;
+      height: 20px;
+      border: 2px solid rgba(255,255,255,0.3);
+      border-top-color: var(--ok);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .progress-bar {
+      width: 100%;
+      height: 4px;
+      background: rgba(255,255,255,0.1);
+      border-radius: 2px;
+      overflow: hidden;
+      margin-top: 10px;
+    }
+
+    .progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, var(--ok), var(--accent));
+      width: 0%;
+      transition: width 0.3s ease;
+      border-radius: 2px;
+    }
+
+    .status-badge {
+      display: inline-block;
+      width: 10px;
+      height: 10px;
+      border-radius: 2px;
+      margin-right: 6px;
+    }
+    .status-unsent { background: #ff5500; }
+    .status-sent { background: #4ade80; }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="title">
+      <h1>GCodeAir</h1>
+      <p>
+        Вставьте G-code, нажмите <b>Подключить</b> и <b>Отправить</b>.
+        <span class="status-badge status-unsent"></span>Оранжевые линии — ожидают отправки, 
+        <span class="status-badge status-sent"></span>зелёные — отправлены.
+      </p>
+    </div>
+    <div class="row">
+      <span class="kbd">Chrome/Edge</span>
+      <span class="kbd">WebSocket</span>
+      <span class="kbd">3D Preview</span>
+    </div>
+  </header>
+
+  <div class="grid">
+    <section class="card">
+      <div class="section">
+        <label for="gcode">G-code</label>
+        <textarea id="gcode" spellcheck="false" placeholder="Вставьте сюда ваш G-code..."></textarea>
+
+        <div class="small">
+          Превью строится по строкам с <span class="kbd">X</span>/<span class="kbd">Y</span> и командами <span class="kbd">G0</span>, <span class="kbd">G1</span>.
+          При отправке линии <span class="kbd">G1</span> меняют цвет на зелёный.
+        </div>
+
+        <div class="btn2" style="margin-top: 12px;">
+          <button class="btn-ok" id="btnPreview">Обновить превью</button>
+          <button class="btn-primary" id="btnUseDemo">Загрузить демо</button>
+          <button id="btnLoadFile">Открыть файл</button>
+          <input id="fileInput" type="file" style="display:none" accept=".gcode,.txt,.nc" />
+        </div>
+      </div>
+    </section>
+
+    <aside class="card">
+      <div class="section status">
+        <div class="pill">
+          <div id="dotConn" class="dot"></div>
+          <div class="meta">
+            <b id="connTitle">Не подключено</b>
+            <span id="connSub">Ожидание устройства...</span>
+          </div>
+        </div>
+
+        <div class="controls">
+          <div>
+            <label for="IP">IP</label>
+            <input id="IP" type="text" value="192.168.1.58" />
+          </div>
+          <div>
+            <label for="Port">Port</label>
+            <input id="Port" type="number" value="8888" min="0" step="1" />
+          </div>
+        </div>
+
+        <div class="controls">
+          <button class="btn-primary" id="btnConnect">Подключить</button>
+          <button class="btn-danger" id="btnDisconnect" disabled>Отключить</button>
+        </div>
+
+        <div class="controls">
+          <button class="btn-ok" id="btnSend" disabled>Отправить</button>
+          <button class="btn-danger" id="btnStop" disabled>Стоп</button>
+          <button class="btn-primary" id="btnResetColors" disabled>Сбросить цвета</button>
+        </div>
+
+        <div class="progress-bar">
+          <div class="progress-fill" id="progressFill"></div>
+        </div>
+
+        <label for="log">Лог</label>
+        <div class="log" id="log"></div>
+
+        <div class="small">
+          ⚡ Оптимизированная визуализация: тысячи линий без зависаний.
+        </div>
+      </div>
+
+      <div class="control-grid">
+        <button onclick="uiCmd('$X')">Разблок. ($X)</button>
+        <button onclick="uiCmd('$H')">Домой ($H)</button>
+        <button class="btn-danger" onclick="uiCmd('G92 X0 Y0 Z0')">Занулить XYZ</button>
+        
+        <button onclick="uiCmd('G0 X0 Y0')">В 0,0</button>
+        <button onclick="uiCmd('G0 Z5')">Z вверх</button>
+        <button onclick="uiCmd('$I')">Инфо ($I)</button>
+      </div>
+    </aside>
+
+    <section class="card">
+      <div class="section">
+        <div class="previewHeader">
+          <div>
+            <div style="font-weight:800; letter-spacing:.2px; margin-bottom:6px;">3D просмотр движения</div>
+          </div>
+        </div>
+
+        <div class="segControls">
+          <div class="row">
+            <div class="tog">
+              <span>Показать оси</span>
+              <label style="margin:0;">
+                <input id="chkAxes" type="checkbox" checked />
+              </label>
+            </div>
+            <div class="tog">
+              <span>Показать сетку</span>
+              <label style="margin:0;">
+                <input id="chkGrid3d" type="checkbox" checked />
+              </label>
+            </div>
+            <div class="tog">
+              <span>Показать опорные точки</span>
+              <label style="margin:0;">
+                <input id="chkPoints" type="checkbox" />
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <div style="height:10px"></div>
+
+        <div id="canvas3dContainer" style="width:100%; height:500px; background: #0a0a1a; border-radius: 12px; overflow: hidden; position: relative;">
+        </div>
+
+        <div class="previewFooter">
+          <div><span class="mono">Размеры (X/Y/Z)</span>: <span id="bbInfo">—</span></div>
+          <div><span class="mono">G1 сегментов</span>: <span id="g1SegInfo">0</span></div>
+          <div><span class="mono">G0 сегментов</span>: <span id="g0SegInfo">0</span></div>
+          <div><span class="mono">Отправлено</span>: <span id="sentCount">0</span>/<span id="totalCount">0</span></div>
+        </div>
+      </div>
+    </section>
+  </div>
+</div>
+
+<!-- <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.128.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.128.0/examples/jsm/"
+    }
+  }
+</script>
+
+
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+
+<script>
+    // ========== КОНФИГУРАЦИЯ И ПЕРЕМЕННЫЕ ==========
+    let socket = null;
+    let gcodeLines = [];
+    let currentLineIdx = 0;
+    let isSending = false;
+
+    // Three.js переменные
+    let scene, camera, renderer, controls;
+    let gcodeGroup = new THREE.Group();
+    let segments = []; // Хранилище для линий {mesh, type, index}
+
+    const COLORS = {
+        G0: 0x555555,      // Холостой ход - серый
+        G1_PENDING: 0xff5500, // Ожидание - оранжевый
+        G1_SENT: 0x4ade80,    // Отправлено - зеленый
+        AXIS_X: 0xff4444,
+        AXIS_Y: 0x44ff44,
+        AXIS_Z: 0x4444ff
+    };
+
+    // ========== ИНИЦИАЛИЗАЦИЯ 3D ==========
+    function init3D() {
+        const container = document.getElementById('canvas3dContainer');
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x0a0a1a);
+
+        camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 5000);
+        camera.position.set(100, 100, 100);
+
+        renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(container.clientWidth, container.clientHeight);
+        container.appendChild(renderer.domElement);
+
+        controls = new THREE.OrbitControls(camera, renderer.domElement);
+        
+        // Сетка и оси
+        const grid = new THREE.GridHelper(200, 20, 0x222244, 0x222244);
+        grid.rotation.x = Math.PI / 2;
+        scene.add(grid);
+        
+        const axes = new THREE.AxesHelper(50);
+        scene.add(axes);
+        scene.add(gcodeGroup);
+
+        window.addEventListener('resize', () => {
+            camera.aspect = container.clientWidth / container.clientHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(container.clientWidth, container.clientHeight);
+        });
+
+        animate();
+    }
+
+    function animate() {
+        requestAnimationFrame(animate);
+        controls.update();
+        renderer.render(scene, camera);
+    }
+
+    // ========== ЛОГИКА G-CODE ==========
+    function parseGCode() {
+        const text = document.getElementById('gcode').value;
+        gcodeLines = text.split('\n').filter(l => l.trim().length > 0);
+        
+        // Очистка старого превью
+        while(gcodeGroup.children.length > 0) gcodeGroup.remove(gcodeGroup.children[0]);
+        segments = [];
+
+        let lastPos = { x: 0, y: 0, z: 0 };
+        let g0Count = 0, g1Count = 0;
+
+        gcodeLines.forEach((line, idx) => {
+            const cmd = line.toUpperCase();
+            const xMatch = cmd.match(/X([-+]?[0-9]*\.?[0-9]+)/);
+            const yMatch = cmd.match(/Y([-+]?[0-9]*\.?[0-9]+)/);
+            const zMatch = cmd.match(/Z([-+]?[0-9]*\.?[0-9]+)/);
+
+            let newPos = { ...lastPos };
+            if (xMatch) newPos.x = parseFloat(xMatch[1]);
+            if (yMatch) newPos.y = parseFloat(yMatch[1]);
+            if (zMatch) newPos.z = parseFloat(zMatch[1]);
+
+            if (cmd.startsWith('G0') || cmd.startsWith('G1')) {
+                const geometry = new THREE.BufferGeometry().setFromPoints([
+                    new THREE.Vector3(lastPos.x, lastPos.y, lastPos.z),
+                    new THREE.Vector3(newPos.x, newPos.y, newPos.z)
+                ]);
+                
+                const isG0 = cmd.startsWith('G0');
+                const material = new THREE.LineBasicMaterial({ 
+                    color: isG0 ? COLORS.G0 : COLORS.G1_PENDING 
+                });
+                
+                const lineMesh = new THREE.Line(geometry, material);
+                gcodeGroup.add(lineMesh);
+                segments.push({ mesh: lineMesh, type: isG0 ? 'G0' : 'G1', index: idx });
+                
+                if (isG0) g0Count++; else g1Count++;
+            }
+            lastPos = newPos;
+        });
+
+        document.getElementById('g0SegInfo').innerText = g0Count;
+        document.getElementById('g1SegInfo').innerText = g1Count;
+        document.getElementById('totalCount').innerText = gcodeLines.length;
+        updateProgress(0);
+    }
+
+    // ========== WEBSOCKET СВЯЗЬ ==========
+    function connect() {
+        const ip = document.getElementById('IP').value;
+        const port = document.getElementById('Port').value;
+        
+        log(`Подключение к ws://${ip}:${port}...`);
+        socket = new WebSocket(`ws://${ip}:${port}`);
+
+        socket.onopen = () => {
+            document.getElementById('dotConn').className = 'dot ok';
+            document.getElementById('connTitle').innerText = 'Подключено';
+            document.getElementById('btnConnect').disabled = true;
+            document.getElementById('btnDisconnect').disabled = false;
+            document.getElementById('btnSend').disabled = false;
+            log("Соединение установлено!");
+        };
+
+        socket.onclose = () => {
+            document.getElementById('dotConn').className = 'dot bad';
+            document.getElementById('connTitle').innerText = 'Отключено';
+            document.getElementById('btnConnect').disabled = false;
+            document.getElementById('btnDisconnect').disabled = true;
+            document.getElementById('btnSend').disabled = true;
+            isSending = false;
+            log("Соединение разорвано.");
+        };
+
+        socket.onmessage = (event) => {
+            const msg = event.data.trim();
+            log(`GRBL: ${msg}`);
+            
+            // Если получили "ok" и мы в процессе отправки - шлем следующую строку
+            if (msg.toLowerCase().includes('ok') && isSending) {
+                sendNextLine();
+            }
+        };
+
+        socket.onerror = (err) => log("Ошибка связи!");
+    }
+
+    function sendNextLine() {
+        if (currentLineIdx >= gcodeLines.length) {
+            isSending = false;
+            log("ПРОГРАММА ЗАВЕРШЕНА");
+            return;
+        }
+
+        const line = gcodeLines[currentLineIdx];
+        socket.send(line + '\n');
+        
+        // Красим линию в 3D
+        const segment = segments.find(s => s.index === currentLineIdx);
+        if (segment && segment.type === 'G1') {
+            segment.mesh.material.color.setHex(COLORS.G1_SENT);
+        }
+
+        currentLineIdx++;
+        document.getElementById('sentCount').innerText = currentLineIdx;
+        updateProgress((currentLineIdx / gcodeLines.length) * 100);
+    }
+
+    // ========== УТИЛИТЫ ==========
+    function log(msg) {
+        const l = document.getElementById('log');
+        l.innerText += msg + '\n';
+        l.scrollTop = l.scrollHeight;
+    }
+
+    function updateProgress(percent) {
+        document.getElementById('progressFill').style.width = percent + '%';
+    }
+
+    // Назначение кнопок
+    document.getElementById('btnConnect').onclick = connect;
+    document.getElementById('btnDisconnect').onclick = () => socket.close();
+    
+    document.getElementById('btnPreview').onclick = parseGCode;
+    
+    document.getElementById('btnSend').onclick = () => {
+        if (!socket || socket.readyState !== 1) return;
+        currentLineIdx = 0;
+        isSending = true;
+        document.getElementById('btnStop').disabled = false;
+        sendNextLine(); // Начинаем цикл
+    };
+
+    document.getElementById('btnStop').onclick = () => {
+        isSending = false;
+        socket.send('!'); // Команда экстренной остановки GRBL
+        log("ОСТАНОВКА ОТПРАВКИ");
+    };
+
+    document.getElementById('btnUseDemo').onclick = () => {
+        document.getElementById('gcode').value = "G21\nG90\nG0 X0 Y0 Z5\nG1 Z-1 F100\nG1 X50 Y0 F500\nG1 X50 Y50\nG1 X0 Y50\nG1 X0 Y0\nG0 Z5";
+        parseGCode();
+    };
+
+    // Инициализация при загрузке
+    window.onload = init3D;
+
+</script> -->
+
+
+
+<!-- 1. ПОДКЛЮЧЕНИЕ МОДУЛЕЙ -->
+<script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.128.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.128.0/examples/jsm/"
+    }
+  }
+</script>
+
+<!-- 2. ОСНОВНОЙ СКРИПТ (ЛОГИКА + 3D) -->
+<script type="module">
+  import * as THREE from 'three';
+  import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+  // --- Переменные управления ---
+  let socket = null;
+  let isSending = false;
+  let gcodeQueue = [];
+  let currentLineIdx = 0;
+  let lastSentCommand = "";
+
+  // --- Переменные 3D ---
+  const container = document.getElementById('canvas3dContainer');
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x0a0a1a);
+  scene.fog = new THREE.FogExp2(0x0a0a1a, 0.002);
+
+  const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 2000);
+  camera.position.set(80, 60, 100);
+
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(container.clientWidth, container.clientHeight);
+  renderer.setPixelRatio(window.devicePixelRatio);
+  container.appendChild(renderer.domElement);
+
+  const controls3d = new OrbitControls(camera, renderer.domElement);
+  controls3d.enableDamping = true;
+
+  // Освещение и декор
+  scene.add(new THREE.AmbientLight(0x404060));
+  let gridHelper = new THREE.GridHelper(200, 40, 0x88aaff, 0x335588);
+  scene.add(gridHelper);
+  
+  let currentG1Lines = null;
+  let g1SegmentColors = [];
+
+  // --- ЛОГИКА WEBSOCKET ---
+
+  function connect() {
+    const ip = document.getElementById('IP').value;
+    const port = document.getElementById('Port').value;
+    log(`Подключение к ws://${ip}:${port}...`, 'system');
+    
+    socket = new WebSocket(`ws://${ip}:${port}`);
+
+    socket.onopen = () => {
+      document.getElementById('dotConn').className = 'dot ok';
+      document.getElementById('connTitle').innerText = 'В СЕТИ';
+      document.getElementById('btnConnect').disabled = true;
+      document.getElementById('btnDisconnect').disabled = false;
+      document.getElementById('btnSend').disabled = false;
+      document.getElementById('btnResetColors').disabled = false;
+    };
+
+    socket.onclose = () => {
+      document.getElementById('dotConn').className = 'dot bad';
+      document.getElementById('connTitle').innerText = 'ОФФЛАЙН';
+      document.getElementById('btnConnect').disabled = false;
+      document.getElementById('btnSend').disabled = true;
+      isSending = false;
+    };
+
+    socket.onmessage = (event) => {
+    const rawMsg = event.data;
+    
+    // 1. ПРОВЕРКА НА СТАТУС (данные в скобках < >)
+    if (rawMsg.includes('<') && rawMsg.includes('>')) {
+        const statusMatch = rawMsg.match(/<([^>]+)>/);
+        if (statusMatch) {
+            parseStatus(statusMatch[1]);
+        }
+    }
+
+    // 2. ОБЫЧНЫЙ ЛОГ (ok, ошибки и прочее)
+    const cleanMsg = rawMsg.trim();
+    if (cleanMsg) {
+        appendResponse(cleanMsg);
+    }
+
+    // 3. ЛОГИКА ОЧЕРЕДИ
+    if (isSending && cleanMsg.toLowerCase().includes('ok')) {
+        sendNext();
+    }
+};
+  }
+
+  function parseStatus(statusStr) {
+    // Пример строки: Idle|MPos:0.000,0.000,0.000|FS:0,0
+    const parts = statusStr.split('|');
+    const state = parts[0]; // Idle, Run, Hold и т.д.
+    
+    document.getElementById('connSub').innerText = "Статус: " + state;
+
+    parts.forEach(part => {
+        if (part.startsWith('MPos:')) {
+            const coords = part.replace('MPos:', '').split(',');
+            // Здесь можно выводить координаты в интерфейс
+            // document.getElementById('posInfo').innerText = `X: ${coords[0]} Y: ${coords[1]} Z: ${coords[2]}`;
+        }
+    });
+}
+
+  function sendCommand(cmd, isSilent = false) {
+    if (!socket || socket.readyState !== 1) return;
+    lastSentCommand = cmd;
+    socket.send(cmd + '\n');
+    if (!isSilent) log(`> ${cmd}`, 'sent');
+  }
+
+  function sendNextFromQueue() {
+    if (currentLineIdx < gcodeQueue.length && isSending) {
+      const line = gcodeQueue[currentLineIdx].trim();
+      if (line.length === 0) {
+        currentLineIdx++;
+        sendNextFromQueue();
+        return;
+      }
+      sendCommand(line);
+      currentLineIdx++;
+    } else if (currentLineIdx >= gcodeQueue.length) {
+      isSending = false;
+      log("--- Цикл завершен ---", 'system');
+    }
+  }
+
+  // --- ФУНКЦИИ ЛОГА ---
+  function log(msg, type) {
+    const logDiv = document.getElementById('log');
+    const entry = document.createElement('div');
+    entry.className = `log-entry ${type}`;
+    entry.innerHTML = `<span class="cmd-text">${msg}</span><span class="resp-text"></span>`;
+    logDiv.appendChild(entry);
+    logDiv.scrollTop = logDiv.scrollHeight;
+  }
+
+  function appendResponse(resp) {
+    const entries = document.querySelectorAll('.log-entry');
+    if (entries.length > 0) {
+      const lastRespSpan = entries[entries.length - 1].querySelector('.resp-text');
+      if (lastRespSpan) lastRespSpan.innerText = ` ← ${resp}`;
+    }
+  }
+
+  // --- ФУНКЦИИ ВИЗУАЛИЗАЦИИ (Ваш оптимизированный код) ---
+  
+  window.updateGCodeVisualization = function(gcodeText) {
+     // Здесь вызывается ваш алгоритм parseAndCreateLinesOptimized
+     // (Код парсинга остается таким же, как вы прислали)
+     const result = parseAndCreateLinesOptimized(gcodeText); 
+     if (result) {
+        if (currentG1Lines) scene.remove(currentG1Lines);
+        currentG1Lines = result.g1Lines;
+        scene.add(currentG1Lines);
+        // Центрирование камеры...
+     }
+  };
+
+  // Метод для покраски сегмента (вызывается при получении 'ok')
+  window.markSegmentAsSent = function(segmentIndex) {
+    if (currentG1Lines && segmentIndex < g1SegmentColors.length) {
+      const colorAttribute = currentG1Lines.geometry.attributes.color;
+      const color = new THREE.Color(0x4ade80); // Зеленый
+      colorAttribute.setXYZ(segmentIndex * 2, color.r, color.g, color.b);
+      colorAttribute.setXYZ(segmentIndex * 2 + 1, color.r, color.g, color.b);
+      colorAttribute.needsUpdate = true;
+    }
+  };
+
+  // --- ОБРАБОТКА КНОПОК ---
+  
+  document.getElementById('btnConnect').onclick = connect;
+  document.getElementById('btnDisconnect').onclick = () => socket.close();
+
+  document.getElementById('btnSend').onclick = () => {
+    const text = document.getElementById('gcode').value;
+    gcodeQueue = text.split('\n');
+    currentLineIdx = 0;
+    isSending = true;
+    document.getElementById('btnStop').disabled = false;
+    sendNextFromQueue();
+  };
+
+  document.getElementById('btnStop').onclick = () => {
+    isSending = false;
+    sendCommand('!', true); // Мгновенная остановка GRBL
+    log("!!! СТОП !!!", 'danger');
+  };
+
+  // Кнопки управления (Добавьте в HTML)
+  window.uiCmd = (cmd) => sendCommand(cmd);
+
+  function animate() {
+    requestAnimationFrame(animate);
+    controls3d.update();
+    renderer.render(scene, camera);
+  }
+  animate();
+</script>
+
+<!-- 3. ДОПОЛНИТЕЛЬНЫЕ СТИЛИ ДЛЯ ЛОГА -->
+<style>
+  .log-entry { margin-bottom: 2px; padding: 2px 5px; border-radius: 4px; }
+  .log-entry.sent { color: #6ea8fe; background: rgba(110,168,254,0.05); }
+  .log-entry.system { color: #2dd4bf; font-style: italic; }
+  .resp-text { color: #4ade80; font-weight: bold; margin-left: 10px; }
+  .control-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 5px; margin-top: 10px; }
+</style>
+
+
+</body>
+</html>

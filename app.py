@@ -1,103 +1,145 @@
-from flask import Flask, render_template, request, jsonify
-import time
 import socket
+import threading
+import time
+from queue import Queue
+from flask import Flask, render_template, jsonify, request
+
 app = Flask(__name__)
-s = None
-def get_socket():
-    global s
-    if s is None:
-        # Создаем сокет, если он еще не создан
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        # Устанавливаем таймаут, чтобы Flask не завис вечно при ожидании ответа
-        s.settimeout(2.0)
-    return s
-@app.get("/")
-def index():
-    return render_template("index.html")
-@app.route('/send', methods=['POST'])
-def process_gcode():
-    global s
-    if s is None:
-        return jsonify({"error": "Socket not initialized"}), 400
+
+# Настройки подключения к ESP8266
+ESP_IP = "192.168.100.58"  # ЗАМЕНИТЕ НА ВАШ IP
+ESP_PORT = 8888
+
+# Переменные состояния
+gcode_queue = Queue()
+is_streaming = False
+
+status_data = {
+    "status": "Idle",
+    "total_lines": 0,
+    "sent_lines": 0,
+    "current_command": "",
+    "buffer_slots": 0,
+    "logs": []  # Список для хранения последних ответов
+}
+
+def grbl_stream_worker(ip, port, queue):
+    global is_streaming, status_data
     
-    try:    
-        data = request.get_json().get('gcode', '')
-        # data = request.json.get('gcode', '')
-        s.sendall((data + '\n').encode('utf-8'))
-        
-        # Получаем ответ (если станок что-то присылает)
-        response = s.recv(1024).decode('utf-8')
-        return jsonify({"result": response})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-   
-    
-@app.route('/connect', methods=['POST'])
-def connectESP():
-    global s
-    sock = None
     try:
-        data = request.get_json()
-        ip = data.get('ip', '')
-        port = data.get('port', '')
-
-        if not ip or not port:
-            return jsonify({"status": "error", "message": "IP or Port missing"}), 400
-
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(3.0) 
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(5.0)
+        s.connect((ip, port))
         
-        # 2. Пытаемся подключиться
-        sock.connect((ip, int(port)))
-        if s:
-            try: s.close() 
-            except: pass
+        # Разблокировка GRBL
+        s.sendall(b"$X\n")
+        time.sleep(0.2)
+        
+        status_data["status"] = "Streaming"
+        status_data["logs"] = ["Connected to ESP8266"]
+        
+        MAX_BUFFER_COMMANDS = 3
+        active_commands = 0
+        recv_accumulator = ""
+        
+        while is_streaming or not queue.empty() or active_commands > 0:
+            # 1. Читаем ответы от GRBL
+            s.setblocking(False)
+            try:
+                data = s.recv(1024).decode('utf-8', errors='ignore')
+                if data:
+                    print(data)
+                    recv_accumulator += data
+                    while "\n" in recv_accumulator:
+                        line, recv_accumulator = recv_accumulator.split("\n", 1)
+                        line = line.strip()
+                        
+                        if line:
+                            # Добавляем строку в лог (храним последние 30 строк)
+                            status_data["logs"].append(line)
+                            if len(status_data["logs"]) > 30:
+                                status_data["logs"].pop(0)
+
+                            if "ok" in line or "error" in line:
+                                if active_commands > 0:
+                                    active_commands -= 1
+                                status_data["buffer_slots"] = active_commands
+            except BlockingIOError:
+                pass
             
-        s = sock
-        # Убираем таймаут для последующей работы, если нужно
-        s.settimeout(None)
-        return jsonify({"status": "connect"})
-
-    except socket.timeout:
-
-        return jsonify({"status": "error", "message": "Connection timed out"}), 408
-    except socket.error as e:
-        
-        return jsonify({"status": "error", "message": f"Socket error: {e}"}), 503
-    except Exception as e:
-        s = None
-        return jsonify({"status": "error", "message": str(e)}), 500
-    finally:
-        # Проверяем, был ли сокет создан, прежде чем менять его настройки
-        if sock is not None:
-            sock.settimeout(None)
-    
-
-
-@app.route('/disconnect')
-def disconnectESP():
-    # global s
-    # s.close()
-    # return jsonify({"status": "disconnect"})
-    global s
-    if s:
+            # 2. Отправляем команды, если есть место в буфере
+            if is_streaming and active_commands < MAX_BUFFER_COMMANDS and not queue.empty():
+                gcode_line = queue.get()
+                clean_line = gcode_line.strip()
+                
+                if clean_line and not clean_line.startswith(";"):
+                    s.sendall((clean_line + "\n").encode('utf-8'))
+                    active_commands += 1
+                    status_data["sent_lines"] += 1
+                    status_data["current_command"] = clean_line
+                    status_data["buffer_slots"] = active_commands
+                
+                queue.task_done()
+                
+            time.sleep(0.001)
+            
+        status_data["status"] = "Finished"
         s.close()
-        s = None
-    return jsonify({"status": "disconnect"})
+        
+    except Exception as e:
+        status_data["status"] = f"Error: {str(e)}"
+        status_data["logs"].append(f"ERROR: {str(e)}")
+    finally:
+        is_streaming = False
 
-@app.get("/api/drawing")
-def api_drawing():
-    return jsonify({
-        "width": 800,
-        "height": 500,
-        "items": [
-            {"type": "line", "x1": 50, "y1": 450, "x2": 750, "y2": 450, "stroke": "#000", "w": 2},
-            {"type": "circle", "cx": 400, "cy": 250, "r": 80, "stroke": "blue", "w": 3},
-            {"type": "poly", "points": [[200,300],[400,120],[600,300]], "stroke": "red", "w": 2, "fill": "rgba(255,0,0,0.15)"}
-        ]
+@app.route('/')
+def index():
+    return render_template('index.html')
+
+@app.route('/upload', methods=['POST'])
+def upload_gcode():
+    global is_streaming, status_data
+    if is_streaming:
+        return jsonify({"error": "Печать уже запущена"}), 400
+        
+    gcode_text = request.form.get('gcode', '')
+    if not gcode_text:
+        return jsonify({"error": "Файл пуст"}), 400
+        
+    with gcode_queue.mutex:
+        gcode_queue.queue.clear()
+        
+    lines = gcode_text.splitlines()
+    for line in lines:
+        if line.strip():
+            gcode_queue.put(line)
+            
+    status_data.update({
+        "total_lines": gcode_queue.qsize(),
+        "sent_lines": 0,
+        "status": "Starting...",
+        "logs": ["G-Code loaded. Starting stream..."]
     })
+    
+    is_streaming = True
+    thread = threading.Thread(target=grbl_stream_worker, args=(ESP_IP, ESP_PORT, gcode_queue))
+    thread.daemon = True
+    thread.start()
+    
+    return jsonify({"success": True, "lines": len(lines)})
 
+@app.route('/status')
+def get_status():
+    return jsonify(status_data)
 
+@app.route('/stop', methods=['POST'])
+def stop_stream():
+    global is_streaming
+    is_streaming = False
+    with gcode_queue.mutex:
+        gcode_queue.queue.clear()
+    status_data["status"] = "Stopped"
+    return jsonify({"success": True})
 
-if __name__ == "__main__":
-    app.run(debug=True)
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000, debug=True)

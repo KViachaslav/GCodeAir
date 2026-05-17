@@ -469,7 +469,7 @@
     </section>
   </div>
 </div>
-
+<!-- 
 <script type="importmap">
   {
     "imports": {
@@ -1161,6 +1161,204 @@ M30`;
   setTimeout(() => {
     window.updateGCodeVisualization(gcodeEl.value);
   }, 500);
+</script> -->
+
+<!-- 1. ПОДКЛЮЧЕНИЕ МОДУЛЕЙ -->
+<script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.128.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.128.0/examples/jsm/"
+    }
+  }
 </script>
+
+<!-- 2. ОСНОВНОЙ СКРИПТ (ЛОГИКА + 3D) -->
+<script type="module">
+  import * as THREE from 'three';
+  import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+  // --- Переменные управления ---
+  let socket = null;
+  let isSending = false;
+  let gcodeQueue = [];
+  let currentLineIdx = 0;
+  let lastSentCommand = "";
+
+  // --- Переменные 3D ---
+  const container = document.getElementById('canvas3dContainer');
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x0a0a1a);
+  scene.fog = new THREE.FogExp2(0x0a0a1a, 0.002);
+
+  const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 2000);
+  camera.position.set(80, 60, 100);
+
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(container.clientWidth, container.clientHeight);
+  renderer.setPixelRatio(window.devicePixelRatio);
+  container.appendChild(renderer.domElement);
+
+  const controls3d = new OrbitControls(camera, renderer.domElement);
+  controls3d.enableDamping = true;
+
+  // Освещение и декор
+  scene.add(new THREE.AmbientLight(0x404060));
+  let gridHelper = new THREE.GridHelper(200, 40, 0x88aaff, 0x335588);
+  scene.add(gridHelper);
+  
+  let currentG1Lines = null;
+  let g1SegmentColors = [];
+
+  // --- ЛОГИКА WEBSOCKET ---
+
+  function connect() {
+    const ip = document.getElementById('IP').value;
+    const port = document.getElementById('Port').value;
+    log(`Подключение к ws://${ip}:${port}...`, 'system');
+    
+    socket = new WebSocket(`ws://${ip}:${port}`);
+
+    socket.onopen = () => {
+      document.getElementById('dotConn').className = 'dot ok';
+      document.getElementById('connTitle').innerText = 'В СЕТИ';
+      document.getElementById('btnConnect').disabled = true;
+      document.getElementById('btnDisconnect').disabled = false;
+      document.getElementById('btnSend').disabled = false;
+      document.getElementById('btnResetColors').disabled = false;
+    };
+
+    socket.onclose = () => {
+      document.getElementById('dotConn').className = 'dot bad';
+      document.getElementById('connTitle').innerText = 'ОФФЛАЙН';
+      document.getElementById('btnConnect').disabled = false;
+      document.getElementById('btnSend').disabled = true;
+      isSending = false;
+    };
+
+    socket.onmessage = (event) => {
+      const response = event.data.trim();
+      // Выводим ответ в лог рядом с последней командой
+      appendResponse(response);
+
+      if (isSending && response.toLowerCase().includes('ok')) {
+        // Если это была команда перемещения G1, красим её в 3D
+        if (gcodeQueue[currentLineIdx-1]?.toUpperCase().includes('G1')) {
+             window.markSegmentAsSent(currentLineIdx - 1); 
+        }
+        sendNextFromQueue();
+      }
+    };
+  }
+
+  function sendCommand(cmd, isSilent = false) {
+    if (!socket || socket.readyState !== 1) return;
+    lastSentCommand = cmd;
+    socket.send(cmd + '\n');
+    if (!isSilent) log(`> ${cmd}`, 'sent');
+  }
+
+  function sendNextFromQueue() {
+    if (currentLineIdx < gcodeQueue.length && isSending) {
+      const line = gcodeQueue[currentLineIdx].trim();
+      if (line.length === 0) {
+        currentLineIdx++;
+        sendNextFromQueue();
+        return;
+      }
+      sendCommand(line);
+      currentLineIdx++;
+    } else if (currentLineIdx >= gcodeQueue.length) {
+      isSending = false;
+      log("--- Цикл завершен ---", 'system');
+    }
+  }
+
+  // --- ФУНКЦИИ ЛОГА ---
+  function log(msg, type) {
+    const logDiv = document.getElementById('log');
+    const entry = document.createElement('div');
+    entry.className = `log-entry ${type}`;
+    entry.innerHTML = `<span class="cmd-text">${msg}</span><span class="resp-text"></span>`;
+    logDiv.appendChild(entry);
+    logDiv.scrollTop = logDiv.scrollHeight;
+  }
+
+  function appendResponse(resp) {
+    const entries = document.querySelectorAll('.log-entry');
+    if (entries.length > 0) {
+      const lastRespSpan = entries[entries.length - 1].querySelector('.resp-text');
+      if (lastRespSpan) lastRespSpan.innerText = ` ← ${resp}`;
+    }
+  }
+
+  // --- ФУНКЦИИ ВИЗУАЛИЗАЦИИ (Ваш оптимизированный код) ---
+  
+  window.updateGCodeVisualization = function(gcodeText) {
+     // Здесь вызывается ваш алгоритм parseAndCreateLinesOptimized
+     // (Код парсинга остается таким же, как вы прислали)
+     const result = parseAndCreateLinesOptimized(gcodeText); 
+     if (result) {
+        if (currentG1Lines) scene.remove(currentG1Lines);
+        currentG1Lines = result.g1Lines;
+        scene.add(currentG1Lines);
+        // Центрирование камеры...
+     }
+  };
+
+  // Метод для покраски сегмента (вызывается при получении 'ok')
+  window.markSegmentAsSent = function(segmentIndex) {
+    if (currentG1Lines && segmentIndex < g1SegmentColors.length) {
+      const colorAttribute = currentG1Lines.geometry.attributes.color;
+      const color = new THREE.Color(0x4ade80); // Зеленый
+      colorAttribute.setXYZ(segmentIndex * 2, color.r, color.g, color.b);
+      colorAttribute.setXYZ(segmentIndex * 2 + 1, color.r, color.g, color.b);
+      colorAttribute.needsUpdate = true;
+    }
+  };
+
+  // --- ОБРАБОТКА КНОПОК ---
+  
+  document.getElementById('btnConnect').onclick = connect;
+  document.getElementById('btnDisconnect').onclick = () => socket.close();
+
+  document.getElementById('btnSend').onclick = () => {
+    const text = document.getElementById('gcode').value;
+    gcodeQueue = text.split('\n');
+    currentLineIdx = 0;
+    isSending = true;
+    document.getElementById('btnStop').disabled = false;
+    sendNextFromQueue();
+  };
+
+  document.getElementById('btnStop').onclick = () => {
+    isSending = false;
+    sendCommand('!', true); // Мгновенная остановка GRBL
+    log("!!! СТОП !!!", 'danger');
+  };
+
+  // Кнопки управления (Добавьте в HTML)
+  window.uiCmd = (cmd) => sendCommand(cmd);
+
+  function animate() {
+    requestAnimationFrame(animate);
+    controls3d.update();
+    renderer.render(scene, camera);
+  }
+  animate();
+</script>
+
+<!-- 3. ДОПОЛНИТЕЛЬНЫЕ СТИЛИ ДЛЯ ЛОГА -->
+<style>
+  .log-entry { margin-bottom: 2px; padding: 2px 5px; border-radius: 4px; }
+  .log-entry.sent { color: #6ea8fe; background: rgba(110,168,254,0.05); }
+  .log-entry.system { color: #2dd4bf; font-style: italic; }
+  .resp-text { color: #4ade80; font-weight: bold; margin-left: 10px; }
+  .control-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 5px; margin-top: 10px; }
+</style>
+
+
+
+
 </body>
 </html>

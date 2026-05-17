@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>CNC Control Panel</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 20px; background: #2c3e50; color: white; }
+        #console { height: 350px; overflow-y: auto; background: #1e1e1e; color: #00ff00; padding: 15px; border-radius: 8px; margin-bottom: 15px; font-family: 'Consolas', monospace; border: 1px solid #444; }
+        textarea { width: 100%; height: 150px; background: #34495e; color: white; border: 1px solid #555; border-radius: 5px; padding: 10px; font-family: monospace; resize: vertical; }
+        .controls { margin-top: 10px; display: flex; gap: 10px; }
+        button { padding: 10px 25px; cursor: pointer; border: none; border-radius: 4px; background: #3498db; color: white; font-weight: bold; }
+        button:hover { background: #2980b9; }
+        button.clear { background: #e74c3c; }
+    </style>
+</head>
+<body>
+
+    <h2>CNC Terminal</h2>
+    <div id="console"></div>
+    
+    <textarea id="gcodeBlock" placeholder="Вставьте блок G-кода здесь...&#10;G1 X10&#10;G1 Y10&#10;M30"></textarea>
+    
+    <div class="controls">
+        <button onclick="sendBlock()">Выполнить блок</button>
+        <button class="clear" onclick="clearConsole()">Очистить консоль</button>
+        <button onclick="sendSingle('?')">Статус (?)</button>
+        <button onclick="sendSingle('$X')">Разблокировка ($X)</button>
+    </div>
+
+    <script>
+    const socket = new WebSocket('ws://192.168.100.58:81');
+    
+    let queue = [];
+    let commandsInFlight = 0; // Счетчик команд, отправленных, но еще не подтвержденных "ok"
+    const MAX_PARALLEL_COMMANDS = 5; // Лимит очереди в контроллере
+
+    socket.onmessage = function(event) {
+        const msg = event.data.trim();
+        if (!msg) return;
+
+        logToConsole("<- " + msg);
+
+        // Если в ответе есть "ok", значит контроллер освободил одно место в своем буфере
+        if (msg.toLowerCase().includes("ok")) {
+            if (commandsInFlight > 0) commandsInFlight--; 
+            processQueue();
+        }
+    };
+
+    function logToConsole(text) {
+        const con = document.getElementById('console');
+        const entry = document.createElement('div');
+        entry.textContent = text;
+        con.appendChild(entry);
+        con.scrollTop = con.scrollHeight;
+    }
+
+    function sendBlock() {
+        const area = document.getElementById('gcodeBlock');
+        const lines = area.value.split('\n');
+        
+        lines.forEach(line => {
+            const trimmed = line.trim();
+            if (trimmed) queue.push(trimmed);
+        });
+
+        area.value = '';
+        processQueue();
+    }
+
+    function sendSingle(cmd) {
+        queue.push(cmd);
+        processQueue();
+    }
+
+    function processQueue() {
+        // Пока в очереди есть задачи И в контроллере есть свободные места (меньше 5)
+        while (queue.length > 0 && commandsInFlight < MAX_PARALLEL_COMMANDS) {
+            const nextCmd = queue.shift();
+            
+            commandsInFlight++; // Увеличиваем счетчик перед отправкой
+            
+            logToConsole("-> " + nextCmd + " (In flight: " + commandsInFlight + ")");
+            socket.send(nextCmd);
+
+            // Если команда — это запрос статуса "?", она обычно не занимает место в буфере 
+            // и на нее не всегда приходит "ok". Если очередь встанет, раскомментируйте строку ниже:
+            // if (nextCmd === '?') commandsInFlight--; 
+        }
+    }
+
+    function clearConsole() {
+        document.getElementById('console').innerHTML = '';
+    }
+
+    socket.onopen = () => logToConsole("--- Connected to ESP8266 ---");
+    socket.onclose = () => logToConsole("--- Disconnected ---");
+</script>
+
+
+</body>
+</html>
