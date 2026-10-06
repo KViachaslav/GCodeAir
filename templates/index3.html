@@ -269,6 +269,18 @@
       .btn2{ grid-template-columns: 1fr; }
     }
 
+
+
+    .btn3{
+      display:grid;
+      grid-template-columns: 1fr 1fr 1fr 1fr 1fr;
+      gap:5px;
+      width: 100%;
+    }
+
+
+
+
     #canvas3dContainer {
       position: relative;
     }
@@ -375,6 +387,24 @@
           <button id="btnLoadFile">Открыть файл</button>
           <input id="fileInput" type="file" style="display:none" accept=".gcode,.txt,.nc" />
         </div>
+        <div class="btn3" style="margin-top: 12px;">
+          <button class="btn-primary" id="btnUseDemo">Home</button>
+          <button class="btn-primary" id="btnUseDemo">▲</button>
+          <button class="btn-primary" id="btnUseDemo">$X</button>
+          <button class="btn-primary" id="btnUseDemo">S +</button>
+          <button class="btn-primary" id="btnUseDemo">Z▲</button>
+          <button class="btn-primary" id="btnUseDemo">◀</button>
+          <button class="btn-primary" id="btnUseDemo">G92</button>  <!-- G92 X0 Y0 Z0 -->
+          <button class="btn-primary" id="btnUseDemo">▶</button>
+          <button class="btn-primary" id="btnUseDemo">S -</button>
+          <button class="btn-primary" id="btnUseDemo">Z▼</button>
+          <button class="btn-primary" id="btnAutoLevel" style="font-size: 8px;">Auto Level</button>
+          <button class="btn-primary" id="btnUseDemo">▼</button>
+          <button class="btn-primary" id="btnUseDemo">ф</button>
+          <button class="btn-primary" id="btnUseDemo">S 0</button>
+          <button class="btn-primary" id="btnUseDemo">15</button>
+        </div>
+
       </div>
     </section>
 
@@ -899,6 +929,15 @@
   const btnResetColors = $("btnResetColors");
   const fileInput = $("fileInput");
 
+
+  let socket = null;
+  let queue = [];
+  let commandsInFlight = 0;
+  const MAX_PARALLEL_COMMANDS = 5;
+
+
+
+
   let stopRequested = false;
   let g1LineIndex = 0;
 
@@ -906,6 +945,15 @@
     const ts = new Date().toLocaleTimeString();
     logEl.textContent += `[${ts}] ${msg}\n`;
     logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  function logToConsole(text) {
+      const con = document.getElementById('console');
+      const entry = document.createElement('div');
+      const timestamp = new Date().toLocaleTimeString();
+      entry.textContent = `[${timestamp}] ${text}`;
+      con.appendChild(entry);
+      con.scrollTop = con.scrollHeight;
   }
 
   function setConnected(connected, sub = "") {
@@ -958,46 +1006,104 @@
 
   async function connectToESP() {
     log(`Подключение к ${IPEl.value}:${PortEl.value}...`);
+    const wsUrl = `ws://${IPEl.value}:${PortEl.value}`;
     try {
-      const response = await fetch('/connect', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ip: IPEl.value, port: PortEl.value })
-      });
+      socket = new WebSocket(wsUrl);
       
-      if (!response.ok) {
-        const errorData = await response.json();
-        log(`Ошибка: ${response.status} - ${errorData.message || 'Неизвестная ошибка'}`);
-        setConnected(false);
-        return;
-      }
+      socket.onopen = function() {
+          logToConsole("--- Connected to " + wsUrl + " ---");
+          setConnected(true, `${IPEl.value}:${PortEl.value}`);
+          // updateConnectionStatus(true);
+          // document.getElementById('controlPanel').style.display = 'block';
+          //resetQueue();
+      };
       
-      const data = await response.json();
-      if (data.status === "connect") {
-        setConnected(true, `${IPEl.value}:${PortEl.value}`);
-        log("Подключено успешно");
-      } else {
-        setConnected(false);
-        log("Ошибка подключения");
-      }
-    } catch (error) {
-      log(`Ошибка подключения: ${error.message}`);
+      socket.onmessage = function(event) {
+          const msg = event.data.trim();
+          if (!msg) return;
+          
+          logToConsole("<- " + msg);
+          
+          if (msg.toLowerCase().includes("ok")) {
+              if (commandsInFlight > 0) commandsInFlight--; 
+              processQueue();
+          }
+      };
+      
+      socket.onerror = function(error) {
+          logToConsole("--- WebSocket Error: " + error + " ---");
+      };
+      
+      socket.onclose = function() {
+          logToConsole("--- Disconnected from " + wsUrl + " ---");
+          // updateConnectionStatus(false);
+          setConnected(false);
+          // document.getElementById('controlPanel').style.display = 'none';
+          resetQueue();
+          socket = null;
+      };
+      
+  } catch (e) {
+      logToConsole("--- Connection failed: " + e.message + " ---");
       setConnected(false);
-    }
+      // updateConnectionStatus(false);
+  }
+
+
+
+
+    // try {
+    //   const response = await fetch('/connect', {
+    //     method: 'POST',
+    //     headers: { 'Content-Type': 'application/json' },
+    //     body: JSON.stringify({ ip: IPEl.value, port: PortEl.value })
+    //   });
+      
+    //   if (!response.ok) {
+    //     const errorData = await response.json();
+    //     log(`Ошибка: ${response.status} - ${errorData.message || 'Неизвестная ошибка'}`);
+    //     setConnected(false);
+    //     return;
+    //   }
+      
+    //   const data = await response.json();
+    //   if (data.status === "connect") {
+    //     setConnected(true, `${IPEl.value}:${PortEl.value}`);
+    //     log("Подключено успешно");
+    //   } else {
+    //     setConnected(false);
+    //     log("Ошибка подключения");
+    //   }
+    // } catch (error) {
+    //   log(`Ошибка подключения: ${error.message}`);
+    //   setConnected(false);
+    // }
   }
 
   async function disconnectESP() {
-    try {
-      const response = await fetch('/disconnect');
-      const data = await response.json();
-      log(data.status || "Отключено");
-      setConnected(false);
-    } catch (error) {
-      log(`Ошибка отключения: ${error.message}`);
-      setConnected(false);
+    if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.close();
+    } else {
+        // updateConnectionStatus(false);
+        setConnected(false);
+        
+        // document.getElementById('controlPanel').style.display = 'none';
+        socket = null;
     }
+    // try {
+    //   const response = await fetch('/disconnect');
+    //   const data = await response.json();
+    //   log(data.status || "Отключено");
+    //   setConnected(false);
+    // } catch (error) {
+    //   log(`Ошибка отключения: ${error.message}`);
+    //   setConnected(false);
+    // }
   }
-
+  function resetQueue() {
+      queue = [];
+      commandsInFlight = 0;
+  }
   btnResetColors.addEventListener('click', () => {
     if (window.resetColors) {
       window.resetColors();
